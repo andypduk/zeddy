@@ -34,6 +34,9 @@ public enum SQLite {
             zeddy_busy_timeout(handle, 5_000)
             try exec("PRAGMA journal_mode=WAL;")
             try exec("PRAGMA synchronous=NORMAL;")
+            try exec("PRAGMA temp_store=MEMORY;")
+            try exec("PRAGMA mmap_size=67108864;")
+            try exec("PRAGMA cache_size=-32000;")
         }
 
         deinit {
@@ -154,13 +157,12 @@ public enum SQLite {
             case nil:
                 rc = Int32(zeddy_bind_null(stmt, idx))
             case let s as String:
-
-                let utf8 = (s as NSString).utf8String
-                // Bind by UTF-8 *byte* length. `s.count` is the character count,
-                // which under-counts multi-byte sequences (e.g. "café") and would
-                // silently truncate the stored text. `utf8.count` is the byte
-                // length the C API requires.
-                rc = Int32(zeddy_bind_text(stmt, idx, utf8, Int32(s.utf8.count)))
+                // Direct UTF-8 byte access without NSString bridging overhead.
+                rc = s.utf8.withContiguousStorageIfAvailable { buf in
+                    zeddy_bind_text(stmt, idx, buf.baseAddress, Int32(buf.count))
+                } ?? s.withCString { cStr in
+                    zeddy_bind_text(stmt, idx, cStr, Int32(s.utf8.count))
+                }
             case let i as Int:
                 rc = Int32(zeddy_bind_int64(stmt, idx, Int64(i)))
             case let i as Int64:
@@ -212,7 +214,7 @@ public enum SQLite {
             case Int(ZEDDY_COL_TEXT):
                 if let p = zeddy_column_text(stmt, Int32(index)) {
                     let bytes = Int(zeddy_column_bytes(stmt, Int32(index)))
-                    return String(bytes: Data(bytes: p, count: bytes), encoding: .utf8) ?? ""
+                    return String(decoding: UnsafeBufferPointer(start: p, count: bytes), as: UTF8.self)
                 }
                 return ""
             case Int(ZEDDY_COL_BLOB):

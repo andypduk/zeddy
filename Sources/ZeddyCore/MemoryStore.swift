@@ -167,13 +167,21 @@ public final class MemoryStore: @unchecked Sendable {
 
     /// Bump usage stats for a set of memory ids (called when they are injected).
     public func markUsed(_ ids: [String], at date: Date = .now) throws {
+        guard !ids.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
-        for id in ids {
-            _ = try db.run(
-                """
-                UPDATE memories SET use_count = use_count + 1, last_used_at = ?1 WHERE id = ?2
-                """, [date, id]
-            )
+        _ = try db.exec("BEGIN TRANSACTION;")
+        do {
+            for id in ids {
+                _ = try db.run(
+                    """
+                    UPDATE memories SET use_count = use_count + 1, last_used_at = ?1 WHERE id = ?2
+                    """, [date, id]
+                )
+            }
+            _ = try db.exec("COMMIT;")
+        } catch {
+            _ = try? db.exec("ROLLBACK;")
+            throw error
         }
     }
 
@@ -250,7 +258,44 @@ public final class MemoryStore: @unchecked Sendable {
 
     public func importJSON(_ data: Data) throws -> Int {
         let items = try JSONDecoder().decode([Memory].self, from: data)
-        for item in items { try upsert(item) }
+        guard !items.isEmpty else { return 0 }
+        lock.lock()
+        defer { lock.unlock() }
+        _ = try db.exec("BEGIN TRANSACTION;")
+        do {
+            for item in items {
+                let tagsJSON = encodeTags(item.tags)
+                let id = item.id.uuidString
+                if let existing = try findById(id), let oldRowid = try rowid(for: id) {
+                    _ = try db.run(
+                        """
+                        UPDATE memories SET kind=?1, title=?2, content=?3, project_path=?4, tags=?5,
+                                            created_at=?6, last_used_at=?7, use_count=?8
+                        WHERE id=?9
+                        """,
+                        [item.kind.rawValue, item.title, item.content, item.projectPath, tagsJSON,
+                         item.createdAt, item.lastUsedAt, item.useCount, id]
+                    )
+                    try syncFTSDelete(rowid: oldRowid, memory: existing)
+                    try syncFTSInsert(rowid: oldRowid, memory: item)
+                } else {
+                    _ = try db.run(
+                        """
+                        INSERT INTO memories (id, kind, title, content, project_path, tags, created_at, last_used_at, use_count)
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                        """,
+                        [id, item.kind.rawValue, item.title, item.content,
+                         item.projectPath, tagsJSON, item.createdAt, item.lastUsedAt, item.useCount]
+                    )
+                    let rowid = try lastInsertRowid()
+                    try syncFTSInsert(rowid: rowid, memory: item)
+                }
+            }
+            _ = try db.exec("COMMIT;")
+        } catch {
+            _ = try? db.exec("ROLLBACK;")
+            throw error
+        }
         return items.count
     }
 
