@@ -51,6 +51,7 @@ func help() {
 
     Usage:
       zeddy add --title TITLE --content TEXT [--kind global|project] [--project PATH] [--tags a,b]
+      zeddy update ID [--title TITLE] [--content TEXT] [--kind global|project] [--project PATH] [--tags a,b]
       zeddy list [--kind global|project] [--project PATH]
       zeddy get ID | delete ID
       zeddy search QUERY [--limit N] [--project PATH]
@@ -78,6 +79,16 @@ case "add", "remember":
     guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { fail("--content is required") }
     let response = request("add", JSONValue.encode(AddPayload(kind: kind, title: title, content: content, projectPath: project, tags: tags)).objectValue ?? [:])
     if let memory: Memory = decode(response, as: Memory.self) { print("added \(memory.id.uuidString)") }
+case "update", "edit":
+    guard let id = args.first else { fail("memory ID is required") }
+    args.removeFirst()
+    let title = option("title", from: &args)
+    let project = projectPath(option("project", from: &args))
+    let kind = option("kind", from: &args).flatMap(Memory.Kind.init(rawValue:))
+    let tags = option("tags", from: &args).map { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+    let content = option("content", from: &args) ?? (args.isEmpty ? nil : args.joined(separator: " "))
+    let response = request("update", JSONValue.encode(UpdatePayload(id: id, kind: kind, title: title, content: content, projectPath: project, tags: tags)).objectValue ?? [:])
+    if let memory: Memory = decode(response, as: Memory.self) { print("updated \(memory.id.uuidString)") }
 case "list", "ls":
     let kind = option("kind", from: &args).flatMap(Memory.Kind.init(rawValue:))
     let project = projectPath(option("project", from: &args))
@@ -100,7 +111,7 @@ case "search":
     guard !query.isEmpty else { fail("query is required") }
     let response = request("search", ["q": .string(query), "limit": .int(limit), "projectPath": project.map(JSONValue.string) ?? .null])
     let hits: [SearchHit] = decode(response, as: [SearchHit].self) ?? []
-    for hit in hits { print(String(format: "%.3f\t%@\t%@", hit.score, hit.memory.id.uuidString, hit.memory.title)) }
+    for hit in hits { print(String(format: "%.4f\t%@\t%@", hit.score, hit.memory.id.uuidString, hit.memory.title)) }
 case "context":
     let stdout = flag("stdout", from: &args)
     let project = projectPath(option("project", from: &args))
@@ -123,10 +134,17 @@ case "prune":
 case "export":
     let response = request("export")
     guard let base64: String = decode(response, as: String.self), let data = Data(base64Encoded: base64) else { fail("invalid export") }
-    if let output = option("out", from: &args) { try? data.write(to: URL(fileURLWithPath: projectPath(output)!)); print("exported \(output)") }
-    else { print(String(decoding: data, as: UTF8.self)) }
+    if let output = option("out", from: &args) {
+        do {
+            try data.write(to: URL(fileURLWithPath: projectPath(output)!))
+            print("exported \(output)")
+        } catch {
+            fail("failed to write \(output): \(error)")
+        }
+    } else { print(String(decoding: data, as: UTF8.self)) }
 case "import":
-    guard let input = option("in", from: &args), let data = try? Data(contentsOf: URL(fileURLWithPath: projectPath(input)!)) else { fail("--in FILE is required") }
+    guard let input = option("in", from: &args) else { fail("--in FILE is required") }
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: projectPath(input)!)) else { fail("file not found: \(input)") }
     let response = request("import", ["data": .string(data.base64EncodedString())])
     print("imported \(decode(response, as: Int.self) ?? 0) memories")
 case "daemon":

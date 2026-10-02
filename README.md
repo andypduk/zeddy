@@ -52,6 +52,7 @@ zeddy context "Add coverage for the service layer" --project /path/to/repo --std
 # Manage stored data
 zeddy list
 zeddy get MEMORY_ID
+zeddy update MEMORY_ID --title "Updated Title" --content "Updated content"
 zeddy delete MEMORY_ID
 zeddy export --out zeddy-backup.json
 zeddy import --in zeddy-backup.json
