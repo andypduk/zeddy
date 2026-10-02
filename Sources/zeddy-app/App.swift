@@ -3,9 +3,18 @@ import ZeddyCore
 
 @main
 struct ZeddyApp: App {
+    @StateObject private var model = AppModel()
+
     var body: some Scene {
-        WindowGroup("Zeddy") { ContentView() }
-            .defaultSize(width: 980, height: 650)
+        WindowGroup("Zeddy") {
+            ContentView(model: model)
+        }
+        .defaultSize(width: 980, height: 650)
+
+        Settings {
+            SettingsView(model: model)
+                .frame(width: 520, height: 480)
+        }
     }
 }
 
@@ -94,7 +103,7 @@ final class AppModel: ObservableObject {
 }
 
 struct ContentView: View {
-    @StateObject private var model = AppModel()
+    @ObservedObject var model: AppModel
 
     var body: some View {
         NavigationSplitView {
@@ -157,17 +166,69 @@ struct ContentView: View {
     }
 
     private var settingsTab: some View {
+        SettingsView(model: model)
+    }
+}
+
+struct SettingsView: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
         Form {
-            Section("Token budget") {
-                Stepper("Total tokens: \(model.settings.budget.totalTokens)", value: $model.settings.budget.totalTokens, in: 100...16_000, step: 100)
-                HStack { Text("Project allocation"); Slider(value: $model.settings.budget.projectRatio, in: 0...1); Text(model.settings.budget.projectRatio, format: .percent.precision(.fractionLength(0))) }
+            Section("Token Budget & Allocation") {
+                Stepper("Total budget: \(model.settings.budget.totalTokens) tokens", value: $model.settings.budget.totalTokens, in: 200...32_000, step: 100)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Project scope allocation:")
+                        Spacer()
+                        Text("\(Int(model.settings.budget.projectRatio * 100))% (\(model.settings.budget.projectTokens) tokens)")
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $model.settings.budget.projectRatio, in: 0...1)
+                }
+                HStack {
+                    Text("Global scope allocation:")
+                    Spacer()
+                    Text("\(100 - Int(model.settings.budget.projectRatio * 100))% (\(model.settings.budget.globalTokens) tokens)")
+                        .foregroundStyle(.secondary)
+                }
             }
-            Section("Retrieval") {
-                HStack { Text("Minimum score"); TextField("Score", value: $model.settings.minScore, format: .number).textFieldStyle(.roundedBorder) }
+            Section("Relevance & Ranking Filter") {
+                HStack {
+                    Text("BM25 minimum score threshold:")
+                    Spacer()
+                    TextField("0.0", value: $model.settings.minScore, format: .number.precision(.fractionLength(2)))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                }
+                Text("Memories scoring below this threshold are omitted from prompt context.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            Button("Save Settings") { model.updateSettings() }
-            Section("Storage") { LabeledContent("Location", value: Paths.base.path); LabeledContent("Socket", value: Paths.daemonSocketPath) }
+            Section("Background Indexing") {
+                Stepper("Index refresh interval: \(Int(model.settings.indexRefreshInterval))s", value: $model.settings.indexRefreshInterval, in: 1...60, step: 1)
+            }
+            Section("Storage & Paths") {
+                LabeledContent("Home Directory", value: Paths.base.path)
+                LabeledContent("SQLite Database", value: Paths.dbFile)
+                LabeledContent("Settings File", value: Paths.settingsFile)
+                LabeledContent("IPC Socket", value: Paths.daemonSocketPath)
+            }
+            Section {
+                HStack {
+                    Button("Reset to Defaults", role: .destructive) {
+                        model.settings = ZeddySettings.default
+                        model.updateSettings()
+                    }
+                    Spacer()
+                    Button("Save Settings") {
+                        model.updateSettings()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
         }
+        .formStyle(.grouped)
     }
 }
 
