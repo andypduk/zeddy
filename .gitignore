@@ -1,5 +1,6 @@
 # Build artifacts
 .build/
+dist/
 *.o
 *.dylib
 .dsymutil/
