@@ -141,15 +141,117 @@ Run `zeddy app`, select the **Settings** tab (gear icon), adjust the token budge
 }
 ```
 
-## Zed integration
+## Zed & 9Router integration
 
-Zeddy does not claim an unverified native Zed context-server protocol. Integrate it through a Zed agent/tool or terminal workflow that knows the current prompt and project path:
+Zeddy acts as local, token-budgeted memory layer for Zed when routing through model proxies like **9Router** (or any OpenAI-compatible provider).
 
-```sh
-zeddy context --project "$PROJECT_ROOT" --stdout "$TASK_PROMPT"
+### Architecture
+
+```text
+┌────────────────────────────────────────────────────────┐
+│                      Zed Editor                        │
+│                                                        │
+│  Assistant / Agent Workflow                            │
+│  "zeddy context --project $PWD --stdout <prompt>"      │
+└───────────────┬────────────────────────────────────────┘
+                │ 1. Fetches concise context
+                ▼
+┌───────────────────────────────┐
+│     Zeddy Daemon (~/.zeddy)   │
+│  SQLite FTS5 + BM25 Ranking   │
+│  Enforces token budget limit  │
+└───────────────┬───────────────┘
+                │ 2. Prompt + token-capped memory block
+                ▼
+┌───────────────────────────────┐
+│        9Router Proxy          │
+│   (http://localhost:20128/v1) │
+└───────────────┬───────────────┘
+                │ 3. Forward to targeted model
+                ▼
+┌───────────────────────────────┐
+│       Language Model          │
+│ (Claude / OpenAI / Local LLM) │
+└───────────────────────────────┘
 ```
 
-Inject that command's output into the model context only when it is non-empty. This preserves Zed's existing workflow while replacing large, always-included memory files with FTS-ranked, budget-capped context.
+### 1. Configure Zed with 9Router
+
+In `~/.config/zed/settings.json`, set 9Router as the OpenAI-compatible language model provider:
+
+```json
+{
+  "assistant": {
+    "default_model": {
+      "provider": "9Router",
+      "model": "my-combo",
+      "enable_thinking": false
+    }
+  },
+  "language_models": {
+    "openai_compatible": {
+      "9Router": {
+        "api_url": "http://localhost:20128/v1",
+        "available_models": [
+          {
+            "name": "my-combo",
+            "display_name": "9Router Combo",
+            "max_tokens": 128000,
+            "max_output_tokens": 8192
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+### 2. Connect Zeddy Memory to Zed Workflows
+
+#### Option A: Zed Assistant Terminal / Shell Tool
+
+When running Zed assistant or agent loops with terminal tool permissions:
+
+```sh
+# Fetch only relevant memories for the prompt under token budget:
+CONTEXT=$(zeddy context --project "$PWD" --stdout "$PROMPT")
+```
+
+#### Option B: Global Agent Rules (`~/.config/zed/AGENTS.md`)
+
+Add the following memory retrieval pattern to your global agent instructions:
+
+```markdown
+## Persistent Memory (Zeddy)
+
+Before tackling non-trivial tasks or answering architecture questions:
+1. Query relevant memories:
+   `zeddy context --project "$PWD" --stdout "<brief task query>"`
+2. If context is returned, treat it as authoritative project or global conventions.
+3. To remember new patterns or decisions:
+   `zeddy add --kind project --project "$PWD" --title "<Title>" --content "<Rule>"`
+```
+
+#### Option C: Zed Task (`.zed/tasks.json`)
+
+Define a task to extract and print context directly inside any project:
+
+```json
+[
+  {
+    "label": "Zeddy: Fetch Context",
+    "command": "zeddy context --project \"$ZED_WORKTREE_ROOT\" --stdout \"$ZED_SELECTED_TEXT\"",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false
+  }
+]
+```
+
+### Why use Zeddy with 9Router & Zed?
+
+- **Zero API token waste**: Instead of dumping large documentation files into every request to 9Router, Zeddy dynamically pulls only BM25-relevant rules up to the configured token budget (e.g. 1,200 tokens).
+- **Reduced latency**: Small prompt sizes route and complete significantly faster through 9Router.
+- **Privacy & offline persistence**: Knowledge rules remain locally stored in SQLite FTS5 (`~/.zeddy/data/memories.db`), independent of cloud providers.
 
 ## How token reduction works
 
