@@ -1,0 +1,10 @@
+# Build artifacts
+.build/
+*.o
+*.dylib
+.dsymutil/
+.swiftpm/
+build.log
+
+# macOS
+.DS_Store
