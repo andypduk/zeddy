@@ -20,11 +20,11 @@ enum {
 };
 
 enum {
-    ZEDDY_COL_NULL = 0, // SQLITE_NULL
     ZEDDY_COL_INT  = 1, // SQLITE_INT
     ZEDDY_COL_REAL = 2, // SQLITE_REAL
     ZEDDY_COL_TEXT = 3, // SQLITE_TEXT
-    ZEDDY_COL_BLOB = 4  // SQLITE_BLOB
+    ZEDDY_COL_BLOB = 4, // SQLITE_BLOB
+    ZEDDY_COL_NULL = 5  // SQLITE_NULL
 };
 
 /* Lifecycle */

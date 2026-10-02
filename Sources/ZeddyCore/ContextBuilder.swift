@@ -42,11 +42,13 @@ public enum ContextBuilder {
         // the prompt, so we search both and let the budget decide the mix.
         let projectHits = try store.search(
             prompt, kind: .project, projectPath: projectPath, limit: 64
-        ).filter { $0.score > minScore }
+        ).filter { $0.score >= minScore }
         let globalHits = try store.search(
             prompt, kind: .global, limit: 64
-        ).filter { $0.score > minScore }
+        ).filter { $0.score >= minScore }
 
+        let projectHeaderCost = TokenEstimator.estimate("## Project memory\n")
+        let globalHeaderCost = TokenEstimator.estimate("## Global memory\n")
         var projectTokens = 0
         var globalTokens = 0
         var projectBlocks: [String] = []
@@ -54,16 +56,18 @@ public enum ContextBuilder {
         var usedIds: [String] = []
 
         for hit in projectHits {
-            guard projectTokens < budget.projectTokens else { break }
             let cost = renderCost(hit.memory)
-            projectTokens += cost
+            let prefix = projectBlocks.isEmpty ? projectHeaderCost : 0
+            guard projectTokens + prefix + cost <= budget.projectTokens else { continue }
+            projectTokens += prefix + cost
             projectBlocks.append(render(hit.memory))
             usedIds.append(hit.memory.id.uuidString)
         }
         for hit in globalHits {
-            guard globalTokens < budget.globalTokens else { break }
             let cost = renderCost(hit.memory)
-            globalTokens += cost
+            let prefix = globalBlocks.isEmpty ? globalHeaderCost : 0
+            guard globalTokens + prefix + cost <= budget.globalTokens else { continue }
+            globalTokens += prefix + cost
             globalBlocks.append(render(hit.memory))
             usedIds.append(hit.memory.id.uuidString)
         }
@@ -107,6 +111,8 @@ public enum ContextBuilder {
     }
 
     private static func renderCost(_ m: Memory) -> Int {
-        TokenEstimator.estimateRendered(title: m.title, body: m.content) + 3
+        // Include every rendered character plus the blank separator between
+        // entries. This is intentionally conservative.
+        TokenEstimator.estimate(render(m)) + 2
     }
 }

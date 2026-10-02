@@ -13,6 +13,7 @@ let package = Package(
             path: "Sources/SQLite",
             publicHeadersPath: "include",
             cSettings: [
+                .define("SQLITE_ENABLE_FTS5"),
                 .define("SQLITE_OMIT_LOAD_EXTENSION")
             ]
         ),

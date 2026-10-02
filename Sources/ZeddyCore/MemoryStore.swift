@@ -51,7 +51,7 @@ public final class MemoryStore: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_path);
 
             CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-            USING fts5(title, content, content='memories', content_rowid='rowid');
+            USING fts5(title, content, content='memories', content_rowid='rowid', tokenize='porter unicode61');
 
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
             """
@@ -258,12 +258,17 @@ public final class MemoryStore: @unchecked Sendable {
     public func pruneUnused(olderThanDays: Int) throws -> Int {
         lock.lock(); defer { lock.unlock() }
         let cutoff = Date(timeIntervalSinceNow: -Double(olderThanDays) * 86_400)
-        // Mark candidates, then delete each (so FTS stays in sync).
+        // Delete while holding this lock rather than calling the public `delete`
+        // method, which would attempt to acquire the same non-recursive lock.
         let ids = try idsWhere(
             "SELECT id FROM memories WHERE use_count = 0 AND created_at < ?1",
             [cutoff]
         )
-        for id in ids { _ = try self.delete(id) }
+        for id in ids {
+            guard let memory = try findById(id), let rowid = try rowid(for: id) else { continue }
+            try syncFTSDelete(rowid: rowid, memory: memory)
+            _ = try db.run("DELETE FROM memories WHERE id = ?1", [id])
+        }
         return ids.count
     }
 

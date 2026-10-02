@@ -118,7 +118,7 @@ public final class Engine: @unchecked Sendable {
                 guard let id = frame.params["id"]?.stringValue else { throw EngineError.missing("id") }
                 return ok(frame.id, JSONValue.bool(try delete(id)))
             case "search":
-                guard let q = frame.params["q"]?.stringValue else { throw EngineError.missing("q") }
+                guard let q = frame.params["q"]?.stringValue ?? frame.params["text"]?.stringValue else { throw EngineError.missing("q") }
                 let kind = frame.params["kind"].flatMap { $0.stringValue }.flatMap(Memory.Kind.init(rawValue:))
                 let project = frame.params["projectPath"]?.stringValue
                 let limit = frame.params["limit"]?.intValue ?? 8
@@ -141,11 +141,9 @@ public final class Engine: @unchecked Sendable {
             case "settings":
                 return ok(frame.id, JSONValue.encode(currentSettings()))
             case "update_settings":
-                var s = currentSettings()
-                if let total = frame.params["totalTokens"]?.intValue { s.budget.totalTokens = total }
-                if let ratio = frame.params["projectRatio"]?.doubleValue { s.budget.projectRatio = ratio }
-                if let interval = frame.params["indexRefreshInterval"]?.doubleValue { s.indexRefreshInterval = interval }
-                if let minScore = frame.params["minScore"]?.doubleValue { s.minScore = minScore }
+                guard let s = decodeParams(ZeddySettings.self, frame.params) else {
+                    throw EngineError.missing("settings")
+                }
                 try saveSettings(s)
                 return ok(frame.id, JSONValue.encode(s))
             default:
@@ -185,26 +183,4 @@ public enum EngineError: Error, CustomStringConvertible {
     }
 }
 
-// Convenience typed getters over JSONValue.
-extension JSONValue {
-    public var stringValue: String? {
-        switch self { case .string(let s): return s; case .int(let i): return String(i); case .double(let d): return String(d); default: return nil }
-    }
-    public var intValue: Int? {
-        switch self { case .int(let i): return i; case .double(let d): return Int(d); case .string(let s): return Int(s); default: return nil }
-    }
-    public var doubleValue: Double? {
-        switch self { case .double(let d): return d; case .int(let i): return Double(i); case .string(let s): return Double(s); default: return nil }
-    }
-    public var boolValue: Bool? {
-        switch self { case .bool(let b): return b; case .string(let s): return s == "true" ? true : (s == "false" ? false : nil); default: return nil }
-    }
-    public var arrayValue: [JSONValue]? {
-        if case .array(let a) = self { return a }
-        return nil
-    }
-    public var objectValue: [String: JSONValue]? {
-        if case .object(let o) = self { return o }
-        return nil
-    }
-}
+

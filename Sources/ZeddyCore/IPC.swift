@@ -1,189 +1,94 @@
 import Foundation
 
-/// The daemon's wire protocol: newline-delimited JSON over the Unix socket.
-///
-/// Each line is a `Frame` (a request) or a `Response` (a reply). `data` is a
-/// free-form `JSONValue` so the protocol stays open: a method's payload/shape is
-/// documented by convention (see `Models.swift` and `MemoryEngine.handle`).
+/// Newline-delimited JSON protocol shared by the daemon, CLI, and GUI.
 public enum IPC {
-    /// Well-known method names.
-    public enum Method: String, Codable, Sendable {
-        case status
-        case remember
-        case get
-        case delete
-        case search
-        case list
-        case buildContext
-        case markUsed
-        case prune
-        case getSettings
-        case setSettings
-        case export
-        case import
-
-        public var rawValue: String {
-            switch self {
-            case .status: return "status"
-            case .remember: return "remember"
-            case .get: return "get"
-            case .delete: return "delete"
-            case .search: return "search"
-            case .list: return "list"
-            case .buildContext: return "build_context"
-            case .markUsed: return "mark_used"
-            case .prune: return "prune"
-            case .getSettings: return "get_settings"
-            case .setSettings: return "set_settings"
-            case .export: return "export"
-            case .import: return "import"
-            }
-        }
-    }
-
-    /// A single JSON value. Encodes/decodes as its JSON shape, which keeps the
-    /// protocol self-describing without a per-method schema.
-    public enum JSONValue: Codable, Sendable {
-        case null
-        case bool(Bool)
-        case number(Double)
-        case string(String)
-        case array([JSONValue])
-        case object([String: JSONValue])
-
-        public init(from decoder: Decoder) throws {
-            let c = try decoder.singleValueContainer()
-            if c.decodeNil() { self = .null }
-            else if let b = try? c.decode(Bool.self) { self = .bool(b) }
-            else if let d = try? c.decode(Double.self) { self = .number(d) }
-            else if let s = try? c.decode(String.self) { self = .string(s) }
-            else if let a = try? c.decode([JSONValue].self) { self = .array(a) }
-            else if let o = try? c.decode([String: JSONValue].self) { self = .object(o) }
-            else { self = .null }
-        }
-
-        public func encode(to encoder: Encoder) throws {
-            var c = encoder.singleValueContainer()
-            switch self {
-            case .null: try c.encodeNil()
-            case .bool(let b): try c.encode(b)
-            case .number(let n): try c.encode(n)
-            case .string(let s): try c.encode(s)
-            case .array(let a): try c.encode(a)
-            case .object(let o): try c.encode(o)
-            }
-        }
-
-        public var string: String? { if case .string(let s) = self { return s }; return nil }
-        public var number: Double? { if case .number(let n) = self { return n }; return nil }
-        public var bool: Bool? { if case .bool(let b) = self { return b }; return nil }
-    }
-
-    /// A request frame (daemon consumes these).
     public struct Frame: Codable, Sendable {
-        public var method: Method
-        public var data: JSONValue?
-        public init(method: Method, data: JSONValue? = nil) {
+        public var method: String
+        public var id: Int
+        public var params: [String: JSONValue]
+
+        public init(method: String, id: Int = 1, params: [String: JSONValue] = [:]) {
             self.method = method
-            self.data = data
+            self.id = id
+            self.params = params
         }
     }
 
-    /// A response frame (daemon sends these; clients decode them).
-    public struct Response: Codable, SerializeError, Sendable {
+    public struct Response: Codable, Sendable {
         public var ok: Bool
-        public var error: String?
+        public var id: Int
         public var data: JSONValue?
+        public var error: String?
 
-        public init(ok: Bool = true, error: String? = nil, data: JSONValue? = nil) {
+        public init(ok: Bool, id: Int, data: JSONValue? = nil, error: String? = nil) {
             self.ok = ok
-            self.error = error
+            self.id = id
             self.data = data
-        }
-
-        /// `data` decoded into a concrete `Codable` type (nil if absent/failed).
-        public func decodeData<T: Codable>(_ type: T.Type) -> T? {
-            guard let data else { return nil }
-            guard let raw = try? IPC.encoder.encode(data) else { return nil }
-            return try? IPC.decoder.decode(T.self, from: raw)
+            self.error = error
         }
     }
 
-    /// Shared encoders so frames and payloads serialize consistently.
-    public static let encoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.outputFormatting = []
-        return e
-    }()
+    public static let encoder: JSONEncoder = JSONEncoder()
     public static let decoder: JSONDecoder = JSONDecoder()
 
-    /// Serialize a response to a single newline-terminated frame (one per line).
-    public static func encodeFrame(_ resp: Response) -> Data? {
-        guard let d = try? encoder.encode(resp) else { return nil }
-        var d = d
-        d.append(0x0A) // '\n'
-        return d
-    }
-
-    /// Serialize a request frame to a single newline-terminated line.
-    public static func encodeRequestFrame(_ frame: Frame) -> Data? {
-        guard let d = try? encoder.encode(frame) else { return nil }
-        var d = d
-        d.append(0x0A)
-        return d
-    }
-
-    /// Parse the next complete line from `buffer` as a `Frame`, if one is ready.
-    public static func readFrame(from buffer: inout [UInt8]) -> Frame? {
-        if let idx = buffer.firstIndex(of: 0x0A) {
-            let line = buffer[..<idx]
-            buffer.removeSubrange(..<idx)
-            if line.isEmpty { return nil }
-            let data = Data(line)
-            return try? decoder.decode(Frame.self, from: data)
-        }
-        return nil
-    }
-
-    /// Parse the next complete line from `buffer` as a `Response`, if one is ready.
-    public static func readResponse(from buffer: inout [UInt8]) -> Response? {
-        if let idx = buffer.firstIndex(of: 0x0A) {
-            let line = buffer[..<idx]
-            buffer.removeSubrange(..<idx)
-            if line.isEmpty { return nil }
-            return try? decoder.decode(Response.self, from: Data(line))
-        }
-        return nil
+    public static func encodeFrame<T: Encodable>(_ value: T) -> Data {
+        var data = (try? encoder.encode(value)) ?? Data()
+        data.append(0x0A)
+        return data
     }
 }
 
-/// The status snapshot returned by the `status` method — surfaced in the GUI
-/// footer/daemon pane and the CLI.
-public struct DaemonStatus: Codable, Sendable {
-    public var version: String?
-    public var socketPath: String
-    public var settings: ZeddySettings
-    public var store: MemoryStore.StoreStatus
-    public var uptimeSeconds: Double
+/// A flexible JSON value used in IPC request and response payloads.
+public indirect enum JSONValue: Codable, Sendable, Hashable {
+    case null
+    case bool(Bool)
+    case int(Int)
+    case double(Double)
+    case string(String)
+    case array([JSONValue])
+    case object([String: JSONValue])
 
-    public init(version: String?, socketPath: String, settings: ZeddySettings,
-                store: MemoryStore.StoreStatus, uptimeSeconds: Double) {
-        self.version = version
-        self.socketPath = socketPath
-        self.settings = settings
-        self.store = store
-        self.uptimeSeconds = uptimeSeconds
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() { self = .null }
+        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
+        else if let value = try? container.decode(Int.self) { self = .int(value) }
+        else if let value = try? container.decode(Double.self) { self = .double(value) }
+        else if let value = try? container.decode(String.self) { self = .string(value) }
+        else if let value = try? container.decode([JSONValue].self) { self = .array(value) }
+        else if let value = try? container.decode([String: JSONValue].self) { self = .object(value) }
+        else { throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value") }
     }
-}
 
-/// A client-facing summary of the daemon's socket reachability (no round-trip
-/// needed for the fields we can read locally).
-public struct ClientStatus: Codable, Sendable {
-    public var socketPath: String
-    public var socketPresent: Bool
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null: try container.encodeNil()
+        case .bool(let value): try container.encode(value)
+        case .int(let value): try container.encode(value)
+        case .double(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        }
+    }
 
-    public init(socketPath: String, socketPresent: Bool) {
-        self.socketPath = socketPath
-        self.socketPresent = socketPresent
+    public static func encode<T: Encodable>(_ value: T) -> JSONValue {
+        guard let data = try? IPC.encoder.encode(value),
+              let result = try? IPC.decoder.decode(JSONValue.self, from: data) else { return .null }
+        return result
+    }
+
+    public var stringValue: String? {
+        switch self { case .string(let value): return value; case .int(let value): return String(value); case .double(let value): return String(value); default: return nil }
+    }
+    public var intValue: Int? {
+        switch self { case .int(let value): return value; case .double(let value): return Int(value); case .string(let value): return Int(value); default: return nil }
+    }
+    public var doubleValue: Double? {
+        switch self { case .double(let value): return value; case .int(let value): return Double(value); case .string(let value): return Double(value); default: return nil }
+    }
+    public var objectValue: [String: JSONValue]? {
+        if case .object(let value) = self { return value }; return nil
     }
 }

@@ -1,5 +1,6 @@
-#include "zeddy.h"
+#include "include/zeddy.h"
 #include <sqlite3.h>
+#include <stddef.h>
 
 /*
  * Implementation of the zeddy_* shim. Each function is a near-1:1 mapping onto
