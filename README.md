@@ -49,6 +49,10 @@ zeddy add --title "Architecture" --kind project --project /path/to/repo \
 zeddy search "how are tests structured" --project /path/to/repo
 zeddy context "Add coverage for the service layer" --project /path/to/repo --stdout
 
+# Inspect and update settings
+zeddy settings
+zeddy settings --set-total 1500 --set-project-ratio 0.70 --set-min-score 0.0
+
 # Manage stored data
 zeddy list
 zeddy get MEMORY_ID
@@ -63,6 +67,79 @@ zeddy app
 ```
 
 The `context --stdout` command prints only the prompt-ready memory block. The token figure is a conservative heuristic (not an exact tokenizer for every AI model).
+
+## Full setup & configuration
+
+### 1. Installation
+
+Build the release binaries:
+
+```sh
+swift build -c release
+```
+
+Add the built binaries to `PATH` or install them into `/usr/local/bin`:
+
+```sh
+cp .build/release/zeddy .build/release/zeddy-daemon .build/release/zeddy-app /usr/local/bin/
+```
+
+*Note: `zeddy-daemon` and `zeddy-app` should stay in the same directory as `zeddy`, or specify daemon binary path via `ZEDDY_DAEMON=/path/to/zeddy-daemon`.*
+
+### 2. Daemon setup
+
+Start the background daemon process:
+
+```sh
+zeddy daemon start
+```
+
+Check status:
+
+```sh
+zeddy daemon status
+```
+
+To stop:
+
+```sh
+zeddy daemon stop
+```
+
+Optional auto-start: create a launchd agent at `~/Library/LaunchAgents/com.zeddy.daemon.plist` pointing to `zeddy-daemon`.
+
+### 3. Settings & configuration
+
+Settings live in `~/.zeddy/settings.json` (or `$ZEDDY_HOME/settings.json`).
+
+#### View settings:
+```sh
+zeddy settings
+```
+
+#### Change settings via CLI:
+```sh
+zeddy settings --set-total 1600 --set-project-ratio 0.70 --set-min-score 0.0
+```
+
+- `--set-total <N>`: Maximum token budget across all retrieved memories (default: 1200).
+- `--set-project-ratio <RATIO>`: Proportion (0.0 to 1.0) reserved for project-specific memories (default: 0.65). Remainder is used for global memories.
+- `--set-min-score <SCORE>`: Minimum BM25 relevance score required for inclusion (default: 0.0).
+
+#### Change settings via GUI:
+Run `zeddy app`, select the **Settings** tab (gear icon), adjust the token budget and ratio sliders, and click **Save Settings**.
+
+#### Direct JSON configuration (`~/.zeddy/settings.json`):
+```json
+{
+  "budget": {
+    "totalTokens": 1200,
+    "projectRatio": 0.65
+  },
+  "indexRefreshInterval": 5,
+  "minScore": 0.0
+}
+```
 
 ## Zed integration
 

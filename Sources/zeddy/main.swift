@@ -56,7 +56,7 @@ func help() {
       zeddy get ID | delete ID
       zeddy search QUERY [--limit N] [--project PATH]
       zeddy context PROMPT [--project PATH] [--stdout]
-      zeddy stats | settings
+      zeddy stats | settings [--set-total N] [--set-project-ratio RATIO] [--set-min-score SCORE]
       zeddy export [--out FILE] | import --in FILE
       zeddy prune [--days N]
       zeddy daemon start|stop|status
@@ -125,8 +125,23 @@ case "stats", "status":
     let response = request("stats")
     if let stats: MemoryStore.Stats = decode(response, as: MemoryStore.Stats.self) { print("memories: \(stats.total)\nby kind: \(stats.byKind)") }
 case "settings":
-    let response = request("settings")
-    if let settings: ZeddySettings = decode(response, as: ZeddySettings.self) { print("budget: \(settings.budget.totalTokens); project ratio: \(settings.budget.projectRatio); min score: \(settings.minScore)") }
+    let setTotal = option("set-total", from: &args).flatMap(Int.init)
+    let setRatio = option("set-project-ratio", from: &args).flatMap(Double.init)
+    let setMinScore = option("set-min-score", from: &args).flatMap(Double.init)
+    if setTotal != nil || setRatio != nil || setMinScore != nil {
+        let currentResp = request("settings")
+        var current: ZeddySettings = decode(currentResp, as: ZeddySettings.self) ?? ZeddySettings.default
+        if let t = setTotal { current.budget.totalTokens = max(0, t) }
+        if let r = setRatio { current.budget.projectRatio = min(1.0, max(0.0, r)) }
+        if let s = setMinScore { current.minScore = s }
+        let updateResp = request("update_settings", JSONValue.encode(current).objectValue ?? [:])
+        if let updated: ZeddySettings = decode(updateResp, as: ZeddySettings.self) {
+            print("updated settings -> budget: \(updated.budget.totalTokens); project ratio: \(updated.budget.projectRatio); min score: \(updated.minScore)")
+        }
+    } else {
+        let response = request("settings")
+        if let settings: ZeddySettings = decode(response, as: ZeddySettings.self) { print("budget: \(settings.budget.totalTokens); project ratio: \(settings.budget.projectRatio); min score: \(settings.minScore)") }
+    }
 case "prune":
     let days = Int(option("days", from: &args) ?? "90") ?? 90
     let response = request("prune", ["olderThanDays": .int(days)])
