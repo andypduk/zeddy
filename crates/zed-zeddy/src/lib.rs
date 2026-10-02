@@ -71,21 +71,52 @@ impl Extension for ZeddyExtension {
             "zeddy" => {
                 let query = args.join(" ");
                 let mut text = String::from("<!-- zeddy: memory context -->\n");
-                text.push_str("Zeddy local memory MCP is active.\n");
-                if !root_dir.is_empty() {
-                    text.push_str(&format!("Project: {}\n", root_dir));
+                text.push_str("### Zeddy Local Memories\n\n");
+
+                let mut cmd = std::process::Command::new("zeddy");
+                if let Ok(path) = std::env::var("ZEDDY_BIN") {
+                    cmd = std::process::Command::new(path);
+                } else if std::path::Path::new("/absolute/path/to/zeddy").exists() {
+                    cmd = std::process::Command::new("/absolute/path/to/zeddy");
                 }
-                if !query.is_empty() {
-                    text.push_str(&format!("Query filter: {}\n", query));
+
+                if query.trim().is_empty() {
+                    cmd.arg("list");
+                    if let Ok(output) = cmd.output() {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        if stdout.trim().is_empty() {
+                            text.push_str(
+                                "No memories found. Add one with `@zeddy` or `/zeddy-add`.\n",
+                            );
+                        } else {
+                            text.push_str("```\n");
+                            text.push_str(&stdout);
+                            text.push_str("```\n");
+                        }
+                    } else {
+                        text.push_str("Zeddy daemon active via MCP `zeddy_list`.\n");
+                    }
+                } else {
+                    cmd.arg("context").arg(&query).arg("--stdout");
+                    if !root_dir.is_empty() {
+                        cmd.arg("--project").arg(&root_dir);
+                    }
+                    if let Ok(output) = cmd.output() {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        if !stdout.trim().is_empty() {
+                            text.push_str(&stdout);
+                        } else {
+                            text.push_str(&format!("No relevant memories matched `{}`.\n", query));
+                        }
+                    } else {
+                        text.push_str(&format!("Query `{}` processed via MCP context.\n", query));
+                    }
                 }
-                text.push_str(
-                    "Ask your assistant: memories are auto-queried via `zeddy_context` MCP tool.",
-                );
 
                 Ok(SlashCommandOutput {
                     text,
                     sections: vec![SlashCommandOutputSection {
-                        range: Range { start: 0, end: 30 },
+                        range: Range { start: 0, end: 28 },
                         label: "Zeddy Memory".to_string(),
                     }],
                 })
@@ -96,10 +127,33 @@ impl Extension for ZeddyExtension {
                     return Err("Usage: /zeddy-search <keyword or phrase>".to_string());
                 }
 
-                let text = format!(
-                    "<!-- zeddy search -->\nSearching local memory for: `{}`\nUse the assistant with `@zeddy` or `zeddy_search` MCP tool to inspect matching snippets.",
-                    query
-                );
+                let mut text = String::from("<!-- zeddy search -->\n");
+                text.push_str(&format!("### Zeddy Search: `{}`\n\n", query));
+
+                let mut cmd = std::process::Command::new("zeddy");
+                if std::path::Path::new("/absolute/path/to/zeddy").exists() {
+                    cmd = std::process::Command::new("/absolute/path/to/zeddy");
+                }
+                cmd.arg("search").arg(&query);
+                if !root_dir.is_empty() {
+                    cmd.arg("--project").arg(&root_dir);
+                }
+
+                if let Ok(output) = cmd.output() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    if stdout.trim().is_empty() {
+                        text.push_str("No memories matched.\n");
+                    } else {
+                        text.push_str("```\n");
+                        text.push_str(&stdout);
+                        text.push_str("```\n");
+                    }
+                } else {
+                    text.push_str(&format!(
+                        "Searching for `{}` via MCP `zeddy_search`.\n",
+                        query
+                    ));
+                }
 
                 Ok(SlashCommandOutput {
                     text,

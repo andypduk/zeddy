@@ -925,7 +925,7 @@ struct MenuBarView: View {
                         .foregroundStyle(.secondary)
 
                     VStack(spacing: 4) {
-                        ForEach(model.usageLogs.prefix(4)) { event in
+                        ForEach(model.usageLogs.prefix(3)) { event in
                             HStack(spacing: 6) {
                                 OperationBadge(method: event.method)
                                 Text(event.promptSnippet.isEmpty ? "—" : event.promptSnippet)
@@ -943,6 +943,51 @@ struct MenuBarView: View {
                     .padding(6)
                     .background(.quaternary.opacity(0.3))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+            }
+
+            // Quick Memory Viewer
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("INDEXED MEMORIES (\(model.memories.count))")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Refresh") { model.refresh() }
+                        .font(.caption2)
+                        .buttonStyle(.plain)
+                }
+
+                if model.memories.isEmpty {
+                    Text("No memories stored yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 4)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 4) {
+                            ForEach(model.memories.prefix(5)) { mem in
+                                HStack(spacing: 6) {
+                                    Image(systemName: mem.kind == .global ? "globe" : "folder")
+                                        .font(.caption2)
+                                        .foregroundStyle(mem.kind == .global ? .cyan : .purple)
+                                    Text(mem.title)
+                                        .font(.caption.weight(.medium))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(mem.content)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .frame(maxWidth: 120, alignment: .trailing)
+                                }
+                                .padding(5)
+                                .background(.quaternary.opacity(0.2))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 110)
                 }
             }
 
