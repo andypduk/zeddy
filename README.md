@@ -1,5 +1,9 @@
 # Zeddy
 
+<p align="center">
+  <img src="Assets/zeddy-logo-manga.svg" alt="Zeddy Manga Logo" width="380"/>
+</p>
+
 Zeddy is a local native macOS memory service for AI-assisted development in Zed. It stores concise project and global memories, finds only the memories relevant to the current task with SQLite FTS5/BM25, and emits a context block constrained by a hard, heuristic token budget.
 
 It consists of:
