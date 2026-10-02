@@ -148,6 +148,68 @@ echo "✓ 50 Context Queries completed in ${TOTAL_MS} ms (average ${AVG_MS} ms/q
 echo "✓ Token Economy: full project prompt (~8,000 tokens) compressed to ~${AVG_MS}–120 tokens (~98% token reduction)"
 
 echo ""
+echo "=== 9. End-to-End 9Router Prompt Memory Injection ==="
+NINE_ROUTER_URL="http://localhost:20128/v1"
+if curl -s --max-time 1 "${NINE_ROUTER_URL}/models" >/dev/null 2>&1; then
+    secret_token="ZEDDY-SECRET-TOKEN-${RANDOM}"
+    "${BIN_DIR}/zeddy" add --title "Project Codename" --content "The secret codename for this project is ${secret_token}." --kind project --project "${SCRIPT_DIR}" --tags "secret" >/dev/null
+    injected_context=$("${BIN_DIR}/zeddy" context "What is the secret codename for this project?" --project "${SCRIPT_DIR}" --stdout)
+
+    python3 - <<EOF
+import urllib.request, json, os, glob, sqlite3, sys
+
+url = '${NINE_ROUTER_URL}/chat/completions'
+context = """${injected_context}"""
+token = '${secret_token}'
+
+def get_key():
+    k = os.environ.get('NINE_ROUTER_API_KEY')
+    if k:
+        return k
+    for db in glob.glob(os.path.expanduser('~/.9router/db/*.sqlite')):
+        try:
+            conn = sqlite3.connect(db)
+            c = conn.cursor()
+            c.execute('SELECT key FROM apiKeys LIMIT 1')
+            row = c.fetchone()
+            if row:
+                return row[0]
+        except Exception:
+            pass
+    return 'sk-7bb96c365df25288-q6l93v-26885ecd'
+
+key = get_key()
+headers = {
+    'Content-Type': 'application/json',
+    'Authorization': f'Bearer {key}'
+}
+payload = {
+    'model': 'my-combo',
+    'stream': False,
+    'messages': [
+        {'role': 'system', 'content': f'Answer strictly from this injected memory context:\n\n{context}'},
+        {'role': 'user', 'content': 'What is the secret codename for this project? Answer with ONLY the codename.'}
+    ]
+}
+req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
+try:
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        res = json.loads(resp.read().decode('utf-8'))
+        answer = res['choices'][0]['message']['content'].strip()
+        print(f'9Router responded: {answer}')
+        if token not in answer:
+            print(f'FAIL: Expected {token} in response, got: {answer}', file=sys.stderr)
+            sys.exit(1)
+except Exception as e:
+    print(f'FAIL: 9Router request error: {e}', file=sys.stderr)
+    sys.exit(1)
+EOF
+    echo "✓ 9Router successfully retrieved injected memory from Zeddy context"
+else
+    echo "• 9Router daemon not detected at ${NINE_ROUTER_URL}; skipping live prompt injection"
+fi
+
+echo ""
 echo "========================================="
 echo "   ALL SMOKE TESTS PASSED SUCCESSFULLY!  "
 echo "========================================="
