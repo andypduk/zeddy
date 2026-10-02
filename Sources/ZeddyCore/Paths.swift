@@ -16,8 +16,12 @@ public enum Paths {
     public static var logFile: String { base.appendingPathComponent("zeddy.log").path }
     public static var daemonSocketPath: String { base.appendingPathComponent("zeddy.sock").path }
     public static var pidFile: String { base.appendingPathComponent("zeddy-daemon.pid").path }
+    public static var logoSvgFile: String { base.appendingPathComponent("zeddy-logo-manga.svg").path }
 
     public static func ensureLayout() throws {
         try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: logoSvgFile) {
+            try? ZeddyLogo.svgContent.write(toFile: logoSvgFile, atomically: true, encoding: .utf8)
+        }
     }
 }

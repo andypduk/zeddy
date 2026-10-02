@@ -61,7 +61,8 @@ func projectPath(_ raw: String?) -> String? {
 
 func help() {
     print("""
-    zeddy — local, token-budgeted memory for Zed workflows
+    ⚡ ZEDDY (ズッディ) — ultra-fast local memory for Zed & 9Router
+    FTS5 • BM25 Ranker • Model Context Protocol • Native macOS
 
     Usage:
       zeddy add --title TITLE --content TEXT [--kind global|project] [--project PATH] [--tags a,b]

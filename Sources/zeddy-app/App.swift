@@ -5,6 +5,13 @@ import ZeddyCore
 struct ZeddyApp: App {
     @StateObject private var model = AppModel()
 
+    init() {
+        try? Paths.ensureLayout()
+        if let icon = ZeddyIconView.loadNSImage() {
+            NSApplication.shared.applicationIconImage = icon
+        }
+    }
+
     var body: some Scene {
         WindowGroup("Zeddy") {
             ContentView(model: model)
@@ -13,7 +20,7 @@ struct ZeddyApp: App {
 
         Settings {
             SettingsView(model: model)
-                .frame(width: 520, height: 480)
+                .frame(width: 520, height: 560)
         }
     }
 }
@@ -121,8 +128,15 @@ struct ContentView: View {
             }
             .navigationTitle("Zeddy")
             .toolbar {
-                Button { model.draft = Memory(title: "", content: ""); model.showingEditor = true } label: { Label("New memory", systemImage: "plus") }
-                Button { model.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                ToolbarItem(placement: .navigation) {
+                    ZeddyIconView(size: 24)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { model.draft = Memory(title: "", content: ""); model.showingEditor = true } label: { Label("New memory", systemImage: "plus") }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { model.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                }
             }
         } detail: {
             TabView {
@@ -149,7 +163,12 @@ struct ContentView: View {
                     HStack { Button("Edit") { model.draft = memory; model.showingEditor = true }; Spacer(); Button("Delete", role: .destructive) { model.delete(memory) } }
                 }
             } else {
-                VStack(spacing: 10) { Image(systemName: "brain").font(.largeTitle); Text("Select a memory").font(.title3); Text("Create or choose a memory to inspect it.").foregroundStyle(.secondary) }
+                VStack(spacing: 14) {
+                    ZeddyIconView(size: 80)
+                    Text("Select a memory").font(.title3.bold())
+                    Text("Create or choose a memory to inspect or edit.").foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -175,6 +194,17 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                HStack(spacing: 16) {
+                    ZeddyIconView(size: 56)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("ZEDDY").font(.headline.bold())
+                        Text("Ultra-fast local memory for Zed & 9Router").font(.subheadline).foregroundStyle(.secondary)
+                        Text("SQLite FTS5 • BM25 Ranker • Model Context Protocol").font(.caption).foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
             Section("Token Budget & Allocation") {
                 Stepper("Total budget: \(model.settings.budget.totalTokens) tokens", value: $model.settings.budget.totalTokens, in: 200...32_000, step: 100)
                 VStack(alignment: .leading, spacing: 6) {
@@ -239,7 +269,10 @@ private struct EditorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Memory").font(.title2.bold())
+            HStack(spacing: 10) {
+                ZeddyIconView(size: 28)
+                Text(model.memories.contains(where: { $0.id == model.draft.id }) ? "Edit Memory" : "New Memory").font(.title2.bold())
+            }
             TextField("Title", text: $model.draft.title)
             Picker("Scope", selection: $model.draft.kind) { Text("Global").tag(Memory.Kind.global); Text("Project").tag(Memory.Kind.project) }.pickerStyle(.segmented)
             TextField("Project path (project scope)", text: Binding(get: { model.draft.projectPath ?? "" }, set: { model.draft.projectPath = $0.isEmpty ? nil : $0 }))
@@ -249,5 +282,55 @@ private struct EditorView: View {
         }
         .padding().frame(minWidth: 520, minHeight: 440)
         .onAppear { tags = model.draft.tags.joined(separator: ", ") }
+    }
+}
+
+// MARK: - Reusable Cyber Manga Icon View
+
+struct ZeddyIconView: View {
+    let size: CGFloat
+
+    static func loadNSImage() -> NSImage? {
+        let candidates = [
+            Paths.logoSvgFile,
+            "Assets/zeddy-logo-manga.svg",
+            "../Assets/zeddy-logo-manga.svg",
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Assets/zeddy-logo-manga.svg").path
+        ]
+        for path in candidates {
+            if FileManager.default.fileExists(atPath: path), let img = NSImage(contentsOfFile: path) {
+                return img
+            }
+        }
+        return nil
+    }
+
+    var body: some View {
+        if let nsImage = Self.loadNSImage() {
+            Image(nsImage: nsImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                        .strokeBorder(LinearGradient(colors: [.cyan.opacity(0.8), .purple.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: max(1, size * 0.03))
+                )
+                .shadow(color: .cyan.opacity(0.3), radius: size * 0.1, x: 0, y: size * 0.04)
+        } else {
+            // Native SwiftUI fallback cyber badge
+            ZStack {
+                RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                    .fill(LinearGradient(colors: [Color(red: 0.08, green: 0.04, blue: 0.15), Color(red: 0.02, green: 0.01, blue: 0.05)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                Text("⚡Z")
+                    .font(.system(size: size * 0.45, weight: .black, design: .monospaced))
+                    .foregroundStyle(LinearGradient(colors: [.cyan, .purple, .pink], startPoint: .topLeading, endPoint: .bottomTrailing))
+            }
+            .frame(width: size, height: size)
+            .overlay(
+                RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                    .strokeBorder(Color.cyan.opacity(0.6), lineWidth: max(1, size * 0.03))
+            )
+        }
     }
 }
