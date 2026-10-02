@@ -12,11 +12,25 @@ func decode<T: Decodable>(_ response: IPC.Response, as type: T.Type) -> T? {
 }
 
 func request(_ method: String, _ params: [String: JSONValue] = [:]) -> IPC.Response {
+    let client = DaemonClient()
+    if client.isRunning {
+        if let response = try? client.call(method, params) {
+            if !response.ok { fail(response.error ?? "request failed") }
+            return response
+        }
+    }
+    // Fallback: in-process engine directly accessing ~/.zeddy/zeddy.db
     do {
-        let response = try DaemonClient().call(method, params)
+        try Paths.ensureLayout()
+        let store = try MemoryStore(path: Paths.dbFile)
+        let engine = Engine(store: store, settings: SettingsStore.load())
+        let frame = IPC.Frame(method: method, params: params)
+        let response = engine.dispatch(frame)
         if !response.ok { fail(response.error ?? "request failed") }
         return response
-    } catch { fail("\(error). Start it with: zeddy daemon start") }
+    } catch {
+        fail("\(error). Start daemon with: zeddy daemon start")
+    }
 }
 
 func option(_ name: String, from args: inout [String]) -> String? {
