@@ -79,13 +79,23 @@ The `context --stdout` command prints only the prompt-ready memory block. The to
 Build the release binaries:
 
 ```sh
-swift build -c release
+# Compile release binaries
+make build
+
+# Package standalone macOS App bundle in dist/Zeddy.app
+make app
+
+# Package drag-to-install DMG in dist/Zeddy.dmg
+make dmg
+
+# Or install binaries to ~/.local/bin
+make install
 ```
 
-Add the built binaries to `PATH` or install them into `/usr/local/bin`:
+Manual copy:
 
 ```sh
-cp .build/release/zeddy .build/release/zeddy-daemon .build/release/zeddy-app /usr/local/bin/
+cp .build/release/zeddy .build/release/zeddy-daemon .build/release/zeddy-app .build/release/zeddy-mcp /usr/local/bin/
 ```
 
 *Note: `zeddy-daemon` and `zeddy-app` should stay in the same directory as `zeddy`, or specify daemon binary path via `ZEDDY_DAEMON=/path/to/zeddy-daemon`.*

@@ -1,4 +1,4 @@
-.PHONY: all build app test smoke install clean
+.PHONY: all build app dmg test smoke install clean
 
 all: build
 
@@ -7,6 +7,9 @@ build:
 
 app:
 	./scripts/package_app.sh
+
+dmg:
+	./scripts/package_dmg.sh
 
 test:
 	swift test
