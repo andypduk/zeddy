@@ -60,6 +60,7 @@ func help() {
       zeddy export [--out FILE] | import --in FILE
       zeddy prune [--days N]
       zeddy daemon start|stop|status
+      zeddy mcp
       zeddy app
 
     State is stored only in ~/.zeddy (or ZEDDY_HOME).
@@ -167,6 +168,22 @@ case "daemon":
     case "start": do { print(try DaemonControl.start() ? "daemon started" : "daemon already running") } catch { fail("\(error)") }
     case "stop": do { try DaemonControl.stop(); print("daemon stopped") } catch { fail("\(error)") }
     default: print(DaemonControl.isRunning() ? "daemon running" : "daemon stopped")
+    }
+case "mcp":
+    let sibling = ((CommandLine.arguments.first ?? "") as NSString).deletingLastPathComponent + "/zeddy-mcp"
+    guard FileManager.default.isExecutableFile(atPath: sibling) else { fail("zeddy-mcp binary not found") }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: sibling)
+    process.arguments = args
+    process.standardInput = FileHandle.standardInput
+    process.standardOutput = FileHandle.standardOutput
+    process.standardError = FileHandle.standardError
+    do {
+        try process.run()
+        process.waitUntilExit()
+        exit(process.terminationStatus)
+    } catch {
+        fail("failed to run zeddy-mcp: \(error)")
     }
 case "app":
     let sibling = ((CommandLine.arguments.first ?? "") as NSString).deletingLastPathComponent + "/zeddy-app"

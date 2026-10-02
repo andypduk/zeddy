@@ -217,7 +217,45 @@ When running Zed assistant or agent loops with terminal tool permissions:
 CONTEXT=$(zeddy context --project "$PWD" --stdout "$PROMPT")
 ```
 
-#### Option B: Global Agent Rules (`~/.config/zed/AGENTS.md`)
+#### Option B: Model Context Protocol (MCP) in Claude, Cursor, Windsurf, & Zed
+
+Zeddy includes a native stdio MCP server target (`zeddy-mcp` or `zeddy mcp`).
+
+Add to your MCP configuration (e.g. `claude_desktop_config.json`, Cursor MCP settings, or Zed MCP configuration):
+
+```json
+{
+  "mcpServers": {
+    "zeddy": {
+      "command": "zeddy",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Or reference the compiled binary directly:
+
+```json
+{
+  "mcpServers": {
+    "zeddy": {
+      "command": "/usr/local/bin/zeddy-mcp"
+    }
+  }
+}
+```
+
+Exposed MCP tools:
+- `zeddy_context(prompt, projectPath)`: Build BM25-ranked, token-budgeted memory context.
+- `zeddy_add(title, content, kind, projectPath, tags)`: Add new memory snippet.
+- `zeddy_search(query, projectPath, limit)`: Full-text search memories.
+- `zeddy_list(kind, projectPath)`: List memories by scope.
+- `zeddy_get(id)`: Retrieve memory by UUID.
+- `zeddy_delete(id)`: Remove memory by UUID.
+- `zeddy_stats()`: Inspect count and token budget.
+
+#### Option C: Global Agent Rules (`~/.config/zed/AGENTS.md`)
 
 Add the following memory retrieval pattern to your global agent instructions:
 
@@ -232,7 +270,7 @@ Before tackling non-trivial tasks or answering architecture questions:
    `zeddy add --kind project --project "$PWD" --title "<Title>" --content "<Rule>"`
 ```
 
-#### Option C: Zed Task (`.zed/tasks.json`)
+#### Option D: Zed Task (`.zed/tasks.json`)
 
 Define a task to extract and print context directly inside any project:
 

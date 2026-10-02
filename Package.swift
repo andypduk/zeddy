@@ -42,6 +42,12 @@ let package = Package(
             dependencies: ["ZeddyCore"],
             path: "Sources/zeddy-app"
         ),
+        // Model Context Protocol (MCP) stdio server for Claude, Cursor, cline, Windsurf, Zed.
+        .executableTarget(
+            name: "zeddy-mcp",
+            dependencies: ["ZeddyCore"],
+            path: "Sources/zeddy-mcp"
+        ),
         .testTarget(
             name: "ZeddyCoreTests",
             dependencies: ["ZeddyCore"],
