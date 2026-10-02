@@ -1,0 +1,21 @@
+id = "zeddy"
+name = "Zeddy"
+version = "0.1.0"
+schema_version = 1
+description = "Native Zed connector for Zeddy ultra-fast local memory service"
+repository = "https://github.com/andypduk/zeddy"
+authors = ["Andy <zeddy@localhost>"]
+
+[lib]
+kind = "Rust"
+version = "0.7.0"
+
+[context_servers.zeddy]
+
+[slash_commands.zeddy]
+description = "Insert relevant memories from Zeddy into context"
+tooltip_text = "Insert Zeddy memory context"
+
+[slash_commands.zeddy-search]
+description = "Search Zeddy memories by keyword/BM25"
+tooltip_text = "Search Zeddy memories"

@@ -189,9 +189,40 @@ Zeddy acts as local, token-budgeted memory layer for Zed when routing through mo
 └───────────────────────────────┘
 ```
 
-### 1. Configure Zed with 9Router
+## Native Zed connector (Rust Extension)
 
-In `~/.config/zed/settings.json`, set 9Router as the OpenAI-compatible language model provider:
+Zeddy includes a native Rust WebAssembly Zed extension (`crates/zed-zeddy`) compiled against the official `zed_extension_api`.
+
+It gives Zed:
+- **Automatic Context Server**: Launches `zeddy-mcp` automatically as a Zed context server.
+- **Slash Commands**: `/zeddy` and `/zeddy-search` inside the Zed Assistant panel.
+
+### Install extension into Zed
+
+```sh
+# Build Rust Wasm extension and install into ~/Library/Application Support/Zed/extensions/installed/zeddy
+make extension
+```
+
+Or full install:
+
+```sh
+make install
+```
+
+### 1. Configure Zed with 9Router & Zeddy context server
+
+In `~/.config/zed/settings.json`, set 9Router as the language model provider and enable `zeddy`:
+
+```json
+{
+  "context_servers": {
+    "zeddy": {
+      "settings": {}
+    }
+  }
+}
+```
 
 ```json
 {

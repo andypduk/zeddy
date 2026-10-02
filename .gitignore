@@ -1,6 +1,8 @@
 # Build artifacts
 .build/
 dist/
+target/
+crates/*/target/
 *.o
 *.dylib
 .dsymutil/

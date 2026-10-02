@@ -1,4 +1,4 @@
-.PHONY: all build app dmg test smoke install clean
+.PHONY: all build app dmg extension test smoke install clean
 
 all: build
 
@@ -11,18 +11,21 @@ app:
 dmg:
 	./scripts/package_dmg.sh
 
+extension:
+	./scripts/install_zed_extension.sh
+
 test:
 	swift test
 
 smoke:
 	./smoke_test.sh
 
-install: build
+install: build extension
 	mkdir -p ~/.local/bin
 	cp .build/release/zeddy ~/.local/bin/zeddy
 	cp .build/release/zeddy-mcp ~/.local/bin/zeddy-mcp
 	cp .build/release/zeddy-daemon ~/.local/bin/zeddy-daemon
-	@echo "Installed zeddy, zeddy-mcp, zeddy-daemon to ~/.local/bin"
+	@echo "Installed zeddy, zeddy-mcp, zeddy-daemon to ~/.local/bin and Zed extension to ~/Library/Application Support/Zed/extensions/installed/zeddy"
 
 clean:
 	rm -rf .build dist
