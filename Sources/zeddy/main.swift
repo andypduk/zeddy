@@ -72,6 +72,7 @@ func help() {
       zeddy search QUERY [--limit N] [--project PATH]
       zeddy context PROMPT [--project PATH] [--stdout]
       zeddy stats | settings [--set-total N] [--set-project-ratio RATIO] [--set-min-score SCORE]
+      zeddy usage [--period live|today|all] | throughput
       zeddy export [--out FILE] | import --in FILE
       zeddy prune [--days N]
       zeddy daemon start|stop|status
@@ -140,6 +141,20 @@ case "context":
 case "stats", "status":
     let response = request("stats")
     if let stats: MemoryStore.Stats = decode(response, as: MemoryStore.Stats.self) { print("memories: \(stats.total)\nby kind: \(stats.byKind)") }
+case "usage", "throughput":
+    let period = option("period", from: &args) ?? "live"
+    let response = request("usage_stats", ["period": .string(period)])
+    if let stats: UsageStats = decode(response, as: UsageStats.self) {
+        print("""
+        ⚡ ZEDDY USAGE & THROUGHPUT (9Router Style)
+        Period:            \(stats.period)
+        Total Requests:    \(stats.totalRequests)
+        Injected Tokens:   \(stats.totalInjectedTokens) tokens
+        Estimated Saved:   \(stats.totalSavedTokens) tokens (Token Saver active)
+        Average Latency:   \(String(format: "%.2f ms", stats.averageLatencyMs))
+        Active Throughput: \(String(format: "%.1f req/s", stats.requestsPerSec)) (\(String(format: "%.1f tok/s", stats.tokensPerSec)))
+        """)
+    }
 case "settings":
     let setTotal = option("set-total", from: &args).flatMap(Int.init)
     let setRatio = option("set-project-ratio", from: &args).flatMap(Double.init)

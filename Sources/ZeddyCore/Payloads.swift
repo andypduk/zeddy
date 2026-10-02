@@ -238,4 +238,16 @@ extension IPC.Frame {
     public static func export() -> IPC.Frame {
         request("export", params: [:])
     }
+
+    public static func usageStats(period: String = "live") -> IPC.Frame {
+        request("usage_stats", params: ["period": .string(period)])
+    }
+
+    public static func usageLogs(limit: Int = 50) -> IPC.Frame {
+        request("usage_logs", params: ["limit": .int(limit)])
+    }
+
+    public static func usageClear() -> IPC.Frame {
+        request("usage_clear", params: [:])
+    }
 }

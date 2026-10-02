@@ -99,3 +99,141 @@ public struct ZeddySettings: Codable, Sendable, Hashable {
 
     public static let `default` = ZeddySettings()
 }
+
+// MARK: - Usage & Throughput Tracking Models (9Router Style)
+
+public struct UsageEvent: Codable, Sendable, Identifiable, Hashable {
+    public var id: String
+    public var timestamp: Date
+    public var method: String
+    public var promptSnippet: String
+    public var injectedTokens: Int
+    public var budgetTokens: Int
+    public var estimatedSavedTokens: Int
+    public var durationMs: Double
+    public var status: String
+    public var memoryTitles: [String]
+
+    public init(
+        id: String = UUID().uuidString,
+        timestamp: Date = .now,
+        method: String,
+        promptSnippet: String,
+        injectedTokens: Int = 0,
+        budgetTokens: Int = 0,
+        estimatedSavedTokens: Int = 0,
+        durationMs: Double = 0.0,
+        status: String = "success",
+        memoryTitles: [String] = []
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.method = method
+        self.promptSnippet = promptSnippet
+        self.injectedTokens = injectedTokens
+        self.budgetTokens = budgetTokens
+        self.estimatedSavedTokens = estimatedSavedTokens
+        self.durationMs = durationMs
+        self.status = status
+        self.memoryTitles = memoryTitles
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, timestamp, method, promptSnippet, injectedTokens, budgetTokens, estimatedSavedTokens, durationMs, status, memoryTitles
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        let epoch = try container.decode(Double.self, forKey: .timestamp)
+        timestamp = Date(timeIntervalSince1970: epoch)
+        method = try container.decode(String.self, forKey: .method)
+        promptSnippet = try container.decode(String.self, forKey: .promptSnippet)
+        injectedTokens = try container.decodeIfPresent(Int.self, forKey: .injectedTokens) ?? 0
+        budgetTokens = try container.decodeIfPresent(Int.self, forKey: .budgetTokens) ?? 0
+        estimatedSavedTokens = try container.decodeIfPresent(Int.self, forKey: .estimatedSavedTokens) ?? 0
+        durationMs = try container.decodeIfPresent(Double.self, forKey: .durationMs) ?? 0.0
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? "success"
+        memoryTitles = try container.decodeIfPresent([String].self, forKey: .memoryTitles) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(timestamp.timeIntervalSince1970, forKey: .timestamp)
+        try container.encode(method, forKey: .method)
+        try container.encode(promptSnippet, forKey: .promptSnippet)
+        try container.encode(injectedTokens, forKey: .injectedTokens)
+        try container.encode(budgetTokens, forKey: .budgetTokens)
+        try container.encode(estimatedSavedTokens, forKey: .estimatedSavedTokens)
+        try container.encode(durationMs, forKey: .durationMs)
+        try container.encode(status, forKey: .status)
+        try container.encode(memoryTitles, forKey: .memoryTitles)
+    }
+}
+
+public struct ThroughputBucket: Codable, Sendable, Identifiable, Hashable {
+    public var id: String
+    public var timestamp: Date
+    public var requestCount: Int
+    public var tokenCount: Int
+
+    public init(id: String = UUID().uuidString, timestamp: Date = .now, requestCount: Int, tokenCount: Int) {
+        self.id = id
+        self.timestamp = timestamp
+        self.requestCount = requestCount
+        self.tokenCount = tokenCount
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, timestamp, requestCount, tokenCount
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        let epoch = try container.decode(Double.self, forKey: .timestamp)
+        timestamp = Date(timeIntervalSince1970: epoch)
+        requestCount = try container.decode(Int.self, forKey: .requestCount)
+        tokenCount = try container.decode(Int.self, forKey: .tokenCount)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(timestamp.timeIntervalSince1970, forKey: .timestamp)
+        try container.encode(requestCount, forKey: .requestCount)
+        try container.encode(tokenCount, forKey: .tokenCount)
+    }
+}
+
+public struct UsageStats: Codable, Sendable, Hashable {
+    public var totalRequests: Int
+    public var totalInjectedTokens: Int
+    public var totalSavedTokens: Int
+    public var averageLatencyMs: Double
+    public var requestsPerSec: Double
+    public var tokensPerSec: Double
+    public var liveBuckets: [ThroughputBucket]
+    public var period: String
+
+    public init(
+        totalRequests: Int = 0,
+        totalInjectedTokens: Int = 0,
+        totalSavedTokens: Int = 0,
+        averageLatencyMs: Double = 0.0,
+        requestsPerSec: Double = 0.0,
+        tokensPerSec: Double = 0.0,
+        liveBuckets: [ThroughputBucket] = [],
+        period: String = "live"
+    ) {
+        self.totalRequests = totalRequests
+        self.totalInjectedTokens = totalInjectedTokens
+        self.totalSavedTokens = totalSavedTokens
+        self.averageLatencyMs = averageLatencyMs
+        self.requestsPerSec = requestsPerSec
+        self.tokensPerSec = tokensPerSec
+        self.liveBuckets = liveBuckets
+        self.period = period
+    }
+}

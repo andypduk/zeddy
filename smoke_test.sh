@@ -210,6 +210,22 @@ else
 fi
 
 echo ""
+echo "=== 10. Testing 9Router-Style Usage & Throughput Tracking ==="
+"${BIN_DIR}/zeddy" daemon start >/dev/null 2>&1 || true
+# Run a couple context queries to generate throughput
+for q in "swift concurrency async await" "fts5 bm25 retrieval ranking" "mcp server stdio protocol"; do
+    "${BIN_DIR}/zeddy" context "${q}" >/dev/null 2>&1 || true
+done
+
+usage_out=$("${BIN_DIR}/zeddy" usage)
+echo "${usage_out}"
+if [[ "${usage_out}" != *"Total Requests"* ]] || [[ "${usage_out}" != *"Active Throughput"* ]] || [[ "${usage_out}" != *"Token Saver active"* ]]; then
+    echo "FAIL: Usage output missing 9Router KPI metrics"
+    exit 1
+fi
+echo "✓ 9Router-style usage & throughput metrics verified"
+
+echo ""
 echo "========================================="
 echo "   ALL SMOKE TESTS PASSED SUCCESSFULLY!  "
 echo "========================================="

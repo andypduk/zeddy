@@ -10,12 +10,14 @@ public final class Engine: @unchecked Sendable {
     private let store: MemoryStore
     private let lock = NSLock()
     private var settings: ZeddySettings
+    private let usageTracker: UsageTracker
 
     public var socketPath: String { Paths.daemonSocketPath }
 
-    public init(store: MemoryStore, settings: ZeddySettings = .default) {
+    public init(store: MemoryStore, settings: ZeddySettings = .default, usageTracker: UsageTracker = .shared) {
         self.store = store
         self.settings = settings
+        self.usageTracker = usageTracker
     }
 
     public func loadSettings() -> ZeddySettings { SettingsStore.load() }
@@ -80,6 +82,7 @@ public final class Engine: @unchecked Sendable {
 
     /// Execute a named request. Shared verbatim by the daemon and the app.
     public func dispatch(_ frame: IPC.Frame) -> IPC.Response {
+        let startTime = Date()
         do {
             switch frame.method {
             case "version":
@@ -101,7 +104,19 @@ public final class Engine: @unchecked Sendable {
                 guard let payload = decodeParams(AddPayload.self, frame.params) else {
                     throw EngineError.missing("memory")
                 }
-                return ok(frame.id, JSONValue.encode(try add(payload.toMemory())))
+                let mem = try add(payload.toMemory())
+                let elapsedMs = Date().timeIntervalSince(startTime) * 1000
+                usageTracker.record(
+                    method: "add",
+                    promptSnippet: String(mem.title.prefix(80)),
+                    injectedTokens: 0,
+                    budgetTokens: 0,
+                    estimatedSavedTokens: 0,
+                    durationMs: elapsedMs,
+                    status: "success",
+                    memoryTitles: [mem.title]
+                )
+                return ok(frame.id, JSONValue.encode(mem))
             case "update":
                 guard let payload = decodeParams(UpdatePayload.self, frame.params) else {
                     throw EngineError.missing("id")
@@ -113,23 +128,82 @@ public final class Engine: @unchecked Sendable {
                 if let k = payload.kind { memory.kind = k }
                 if let pp = payload.projectPath { memory.projectPath = pp }
                 if let tags = payload.tags { memory.tags = tags }
-                return ok(frame.id, JSONValue.encode(try update(memory)))
+                let updated = try update(memory)
+                let elapsedMs = Date().timeIntervalSince(startTime) * 1000
+                usageTracker.record(
+                    method: "update",
+                    promptSnippet: String(updated.title.prefix(80)),
+                    durationMs: elapsedMs,
+                    status: "success",
+                    memoryTitles: [updated.title]
+                )
+                return ok(frame.id, JSONValue.encode(updated))
             case "delete":
                 guard let id = frame.params["id"]?.stringValue else { throw EngineError.missing("id") }
-                return ok(frame.id, JSONValue.bool(try delete(id)))
+                let deleted = try delete(id)
+                let elapsedMs = Date().timeIntervalSince(startTime) * 1000
+                usageTracker.record(
+                    method: "delete",
+                    promptSnippet: id,
+                    durationMs: elapsedMs,
+                    status: deleted ? "success" : "not_found"
+                )
+                return ok(frame.id, JSONValue.bool(deleted))
             case "search":
                 guard let q = frame.params["q"]?.stringValue ?? frame.params["text"]?.stringValue else { throw EngineError.missing("q") }
                 let kind = frame.params["kind"].flatMap { $0.stringValue }.flatMap(Memory.Kind.init(rawValue:))
                 let project = frame.params["projectPath"]?.stringValue
                 let limit = frame.params["limit"]?.intValue ?? 8
-                return ok(frame.id, JSONValue.array(try search(q, kind: kind, projectPath: project, limit: limit).map { JSONValue.encode($0) }))
+                let hits = try search(q, kind: kind, projectPath: project, limit: limit)
+                let elapsedMs = Date().timeIntervalSince(startTime) * 1000
+                let totalTok = hits.reduce(0) { $0 + TokenEstimator.estimate($1.memory.content) }
+                usageTracker.record(
+                    method: "search",
+                    promptSnippet: String(q.prefix(80)),
+                    injectedTokens: totalTok,
+                    budgetTokens: 0,
+                    estimatedSavedTokens: hits.count * 200,
+                    durationMs: elapsedMs,
+                    status: hits.isEmpty ? "empty" : "hit",
+                    memoryTitles: hits.map { $0.memory.title }
+                )
+                return ok(frame.id, JSONValue.array(hits.map { JSONValue.encode($0) }))
             case "prune":
                 let days = frame.params["olderThanDays"]?.intValue ?? 90
                 return ok(frame.id, JSONValue.int(try prune(olderThanDays: days)))
             case "build_context":
                 guard let prompt = frame.params["prompt"]?.stringValue else { throw EngineError.missing("prompt") }
                 let project = frame.params["projectPath"]?.stringValue
-                return ok(frame.id, JSONValue.encode(try buildContext(prompt: prompt, projectPath: project)))
+                let block = try buildContext(prompt: prompt, projectPath: project)
+                let elapsedMs = Date().timeIntervalSince(startTime) * 1000
+                let titles: [String] = block.usedIds.compactMap { id in
+                    if let m = try? self.get(id) { return m.title }
+                    return nil
+                }
+                // Calculate estimated saved tokens vs uncompressed prompt context
+                let saved = max(0, (block.budgetTokens - block.usedTokens) + (block.usedIds.count * 350))
+                usageTracker.record(
+                    method: "build_context",
+                    promptSnippet: String(prompt.prefix(80)),
+                    injectedTokens: block.usedTokens,
+                    budgetTokens: block.budgetTokens,
+                    estimatedSavedTokens: saved,
+                    durationMs: elapsedMs,
+                    status: block.usedTokens > 0 ? "hit" : "empty",
+                    memoryTitles: titles
+                )
+                return ok(frame.id, JSONValue.encode(block))
+            case "usage_stats":
+                let period = frame.params["period"]?.stringValue ?? "live"
+                let s = usageTracker.stats(period: period)
+                return ok(frame.id, JSONValue.encode(s))
+            case "usage_logs":
+                let limit = frame.params["limit"]?.intValue ?? 50
+                let logs = usageTracker.recentLogs(limit: limit)
+                return ok(frame.id, JSONValue.array(logs.map { JSONValue.encode($0) }))
+            case "usage_clear":
+                usageTracker.clear()
+                return ok(frame.id, JSONValue.bool(true))
             case "export":
                 let data = try exportJSON()
                 let base64 = data.base64EncodedString()

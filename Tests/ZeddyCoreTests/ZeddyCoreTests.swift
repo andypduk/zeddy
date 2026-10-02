@@ -76,4 +76,45 @@ final class ZeddyCoreTests: XCTestCase {
         XCTAssertEqual(decoded.method, "add")
         XCTAssertEqual(decoded.params["title"]?.stringValue, "Protocol")
     }
+
+    func testUsageTrackerAndThroughput() throws {
+        let (store, file) = try makeStore()
+        defer { removeDatabase(file) }
+        let tracker = UsageTracker()
+        let engine = Engine(store: store, usageTracker: tracker)
+
+        // Seed a memory
+        _ = engine.dispatch(IPC.Frame.add(title: "Architecture", content: "Fast local SQLite FTS5 store"))
+
+        // Build context
+        let ctxFrame = IPC.Frame.buildContext(prompt: "architecture sqlite")
+        let res = engine.dispatch(ctxFrame)
+        XCTAssertTrue(res.ok)
+
+        // Query usage stats via IPC
+        let statsRes = engine.dispatch(IPC.Frame.usageStats(period: "live"))
+        XCTAssertTrue(statsRes.ok)
+        guard let data = statsRes.data,
+              let stats = try? IPC.decoder.decode(UsageStats.self, from: IPC.encoder.encode(data)) else {
+            XCTFail("Could not decode UsageStats")
+            return
+        }
+
+        XCTAssertEqual(stats.totalRequests, 2)
+        XCTAssertGreaterThan(stats.totalInjectedTokens, 0)
+        XCTAssertEqual(stats.liveBuckets.count, 15)
+
+        // Query usage logs via IPC
+        let logsRes = engine.dispatch(IPC.Frame.usageLogs(limit: 10))
+        XCTAssertTrue(logsRes.ok)
+        guard let logsData = logsRes.data,
+              let logs = try? IPC.decoder.decode([UsageEvent].self, from: IPC.encoder.encode(logsData)) else {
+            XCTFail("Could not decode logs")
+            return
+        }
+
+        XCTAssertEqual(logs.count, 2)
+        XCTAssertEqual(logs[0].method, "build_context")
+        XCTAssertEqual(logs[1].method, "add")
+    }
 }
