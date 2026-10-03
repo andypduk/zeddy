@@ -11,3 +11,8 @@ build.log
 
 # macOS
 .DS_Store
+
+# Stress test artifacts
+stress_2hr.log
+stress_2hr.pid
+stress_summary.json
