@@ -1,4 +1,4 @@
-.PHONY: all build app dmg extension test smoke install clean
+.PHONY: all build app dmg extension test smoke stress install clean
 
 all: build
 
@@ -19,6 +19,9 @@ test:
 
 smoke:
 	./smoke_test.sh
+
+stress:
+	./stress_test.sh
 
 install: build extension
 	mkdir -p ~/.local/bin
