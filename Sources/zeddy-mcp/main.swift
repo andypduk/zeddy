@@ -216,11 +216,23 @@ final class MCPServer {
 
     private func callZeddy(method: String, params: [String: JSONValue] = [:]) throws -> JSONValue {
         if client.isRunning {
-            let res = try client.call(method, params)
-            if !res.ok {
-                throw NSError(domain: "Zeddy", code: 1, userInfo: [NSLocalizedDescriptionKey: res.error ?? "daemon error"])
+            do {
+                let res = try client.call(method, params)
+                if !res.ok {
+                    throw NSError(domain: "Zeddy", code: 1, userInfo: [NSLocalizedDescriptionKey: res.error ?? "daemon error"])
+                }
+                return res.data ?? .null
+            } catch {
+                if let engine {
+                    let frame = IPC.Frame(method: method, params: params)
+                    let res = engine.dispatch(frame)
+                    if !res.ok {
+                        throw NSError(domain: "Zeddy", code: 1, userInfo: [NSLocalizedDescriptionKey: res.error ?? "engine error"])
+                    }
+                    return res.data ?? .null
+                }
+                throw error
             }
-            return res.data ?? .null
         } else if let engine {
             let frame = IPC.Frame(method: method, params: params)
             let res = engine.dispatch(frame)

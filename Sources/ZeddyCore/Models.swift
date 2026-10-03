@@ -216,6 +216,9 @@ public struct UsageStats: Codable, Sendable, Hashable {
     public var tokensPerSec: Double
     public var liveBuckets: [ThroughputBucket]
     public var period: String
+    public var allTimeRequests: Int
+    public var allTimeInjectedTokens: Int
+    public var allTimeSavedTokens: Int
 
     public init(
         totalRequests: Int = 0,
@@ -225,7 +228,10 @@ public struct UsageStats: Codable, Sendable, Hashable {
         requestsPerSec: Double = 0.0,
         tokensPerSec: Double = 0.0,
         liveBuckets: [ThroughputBucket] = [],
-        period: String = "live"
+        period: String = "live",
+        allTimeRequests: Int = 0,
+        allTimeInjectedTokens: Int = 0,
+        allTimeSavedTokens: Int = 0
     ) {
         self.totalRequests = totalRequests
         self.totalInjectedTokens = totalInjectedTokens
@@ -235,5 +241,8 @@ public struct UsageStats: Codable, Sendable, Hashable {
         self.tokensPerSec = tokensPerSec
         self.liveBuckets = liveBuckets
         self.period = period
+        self.allTimeRequests = allTimeRequests
+        self.allTimeInjectedTokens = allTimeInjectedTokens
+        self.allTimeSavedTokens = allTimeSavedTokens
     }
 }

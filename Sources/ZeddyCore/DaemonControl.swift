@@ -23,22 +23,39 @@ public enum DaemonControl {
             let sibling = (executable as NSString).deletingLastPathComponent + "/zeddy-daemon"
             if FileManager.default.isExecutableFile(atPath: sibling) { return sibling }
         }
-        let installed = Paths.base.appendingPathComponent("bin/zeddy-daemon").path
-        return FileManager.default.isExecutableFile(atPath: installed) ? installed : nil
+        let bundlePath = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/zeddy-daemon").path
+        if FileManager.default.isExecutableFile(atPath: bundlePath) { return bundlePath }
+        let userLocal = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/zeddy-daemon").path
+        if FileManager.default.isExecutableFile(atPath: userLocal) { return userLocal }
+        let systemCandidates = [
+            "/usr/local/bin/zeddy-daemon",
+            "/opt/homebrew/bin/zeddy-daemon",
+            FileManager.default.currentDirectoryPath + "/.build/release/zeddy-daemon",
+            FileManager.default.currentDirectoryPath + "/.build/debug/zeddy-daemon",
+            Paths.base.appendingPathComponent("bin/zeddy-daemon").path
+        ]
+        for candidate in systemCandidates {
+            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+        }
+        return nil
     }
 
     public static func isRunning() -> Bool {
         guard let raw = try? String(contentsOfFile: Paths.pidFile), let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            return FileManager.default.fileExists(atPath: Paths.daemonSocketPath)
+            return false
         }
         return kill(pid, 0) == 0
     }
 
     @discardableResult
     public static func start() throws -> Bool {
-        guard !isRunning() else { return false }
+        if isRunning() { return false }
         guard let binary = binaryPath() else { throw Error.daemonBinaryNotFound }
         try Paths.ensureLayout()
+
+        // Clean stale socket and pid from prior runs
+        try? FileManager.default.removeItem(atPath: Paths.daemonSocketPath)
+        try? FileManager.default.removeItem(atPath: Paths.pidFile)
         FileManager.default.createFile(atPath: Paths.logFile, contents: nil)
 
         let process = Process()
@@ -48,20 +65,34 @@ public enum DaemonControl {
         process.standardError = try FileHandle(forWritingTo: URL(fileURLWithPath: Paths.logFile))
         do { try process.run() } catch { throw Error.launchFailed(error.localizedDescription) }
 
-        for _ in 0..<20 {
-            if FileManager.default.fileExists(atPath: Paths.daemonSocketPath) { return true }
+        let client = DaemonClient(timeout: 1)
+        for _ in 0..<40 {
+            if FileManager.default.fileExists(atPath: Paths.daemonSocketPath) {
+                // Ensure socket is actually answering requests
+                if let res = try? client.call("version"), res.ok {
+                    return true
+                }
+            }
             usleep(50_000)
+        }
+        if FileManager.default.fileExists(atPath: Paths.daemonSocketPath) {
+            return true
         }
         throw Error.launchFailed("process did not create its socket; see \(Paths.logFile)")
     }
 
     public static func stop() throws {
-        guard let raw = try? String(contentsOfFile: Paths.pidFile), let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            try? FileManager.default.removeItem(atPath: Paths.daemonSocketPath)
-            return
+        if let raw = try? String(contentsOfFile: Paths.pidFile), let pid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            kill(pid, SIGTERM)
+            for _ in 0..<20 {
+                if kill(pid, 0) != 0 { break }
+                usleep(50_000)
+            }
+            if kill(pid, 0) == 0 {
+                kill(pid, SIGKILL)
+            }
         }
-        guard kill(pid, SIGTERM) == 0 || errno == ESRCH else {
-            throw Error.launchFailed("could not signal pid \(pid)")
-        }
+        try? FileManager.default.removeItem(atPath: Paths.pidFile)
+        try? FileManager.default.removeItem(atPath: Paths.daemonSocketPath)
     }
 }

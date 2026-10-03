@@ -46,6 +46,7 @@ final class AppModel: ObservableObject {
     @Published var settings = ZeddySettings.default
     @Published var showingEditor = false
     @Published var draft = Memory(title: "", content: "")
+    @Published var searchFilter = ""
 
     // Throughput & Usage Dashboard State (9Router Style)
     @Published var usageStats = UsageStats()
@@ -57,22 +58,52 @@ final class AppModel: ObservableObject {
 
     private let client = DaemonClient()
     private var pollingTask: Task<Void, Never>?
+    private lazy var localEngine: Engine = {
+        let store = try! MemoryStore(path: Paths.dbFile)
+        return Engine(store: store, settings: SettingsStore.load(), usageTracker: .shared)
+    }()
+
+    var filteredMemories: [Memory] {
+        let filter = searchFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if filter.isEmpty { return memories }
+        return memories.filter {
+            $0.title.lowercased().contains(filter) ||
+            $0.content.lowercased().contains(filter) ||
+            $0.tags.contains(where: { $0.lowercased().contains(filter) }) ||
+            $0.kind.rawValue.lowercased().contains(filter)
+        }
+    }
+
+    func callEngine(_ method: String, _ params: [String: JSONValue] = [:]) -> IPC.Response {
+        checkDaemonStatus()
+        if isDaemonRunning {
+            if let res = try? client.call(method, params) {
+                return res
+            }
+        }
+        // Direct in-process fallback
+        let frame = IPC.Frame(method: method, id: 1, params: params)
+        return localEngine.dispatch(frame)
+    }
 
     func start() {
         do {
             _ = try DaemonControl.start()
             isDaemonRunning = true
             status = "Daemon running"
-            refresh()
-            startUsagePolling()
-        } catch { status = "\(error)" }
+        } catch {
+            isDaemonRunning = false
+            status = "In-process engine active"
+        }
+        refresh()
+        startUsagePolling()
     }
 
     func stopDaemon() {
         do {
             try DaemonControl.stop()
             isDaemonRunning = false
-            status = "Daemon stopped"
+            status = "Daemon stopped (In-process active)"
         } catch { status = "\(error)" }
     }
 
@@ -98,32 +129,43 @@ final class AppModel: ObservableObject {
 
     func fetchUsage() {
         checkDaemonStatus()
-        guard isDaemonRunning else { return }
-        do {
-            let sRes = try client.call("usage_stats", ["period": .string(usagePeriod)])
-            if sRes.ok, let sData = sRes.data, let s: UsageStats = decode(sData, as: UsageStats.self) {
-                self.usageStats = s
-            }
-            let lRes = try client.call("usage_logs", ["limit": .int(60)])
-            if lRes.ok, let lData = lRes.data, let l: [UsageEvent] = decode(lData, as: [UsageEvent].self) {
-                self.usageLogs = l
-            }
-        } catch {}
+        let sRes = callEngine("usage_stats", ["period": .string(usagePeriod)])
+        if sRes.ok, let sData = sRes.data, let s: UsageStats = decode(sData, as: UsageStats.self) {
+            self.usageStats = s
+        } else {
+            self.usageStats = UsageTracker.shared.stats(period: usagePeriod)
+        }
+
+        let lRes = callEngine("usage_logs", ["limit": .int(60)])
+        if lRes.ok, let lData = lRes.data, let l: [UsageEvent] = decode(lData, as: [UsageEvent].self) {
+            self.usageLogs = l
+        } else {
+            self.usageLogs = UsageTracker.shared.recentLogs(limit: 60)
+        }
     }
 
     func clearUsage() {
-        _ = try? client.call("usage_clear")
+        _ = callEngine("usage_clear")
+        UsageTracker.shared.clear()
         fetchUsage()
     }
 
     func refresh() {
-        do {
-            let response = try client.call("list")
-            guard response.ok, let data = response.data else { status = response.error ?? "List failed"; return }
+        let response = callEngine("list")
+        if response.ok, let data = response.data {
             memories = decode(data, as: [Memory].self) ?? []
             settings = currentSettings() ?? settings
             status = "\(memories.count) memories"
-        } catch { status = "\(error)" }
+            if selected == nil, let first = memories.first {
+                selected = first
+                draft = first
+            } else if let sel = selected, !memories.contains(where: { $0.id == sel.id }) {
+                selected = memories.first
+                if let first = memories.first { draft = first }
+            }
+        } else {
+            status = response.error ?? "List failed"
+        }
     }
 
     func saveDraft() {
@@ -136,39 +178,97 @@ final class AppModel: ObservableObject {
         } else {
             payload = JSONValue.encode(UpdatePayload(id: draft.id.uuidString, kind: draft.kind, title: draft.title, content: draft.content, projectPath: draft.projectPath, tags: draft.tags)).objectValue ?? [:]
         }
-        do {
-            let response = try client.call(method, payload)
-            if response.ok { showingEditor = false; refresh() } else { status = response.error ?? "Save failed" }
-        } catch { status = "\(error)" }
+        let response = callEngine(method, payload)
+        if response.ok {
+            showingEditor = false
+            refresh()
+            selected = memories.first(where: { $0.id == draft.id }) ?? memories.first
+        } else {
+            status = response.error ?? "Save failed"
+        }
     }
 
     func delete(_ memory: Memory) {
-        do {
-            let response = try client.call("delete", ["id": .string(memory.id.uuidString)])
-            if response.ok { if selected?.id == memory.id { selected = nil }; refresh() }
-        } catch { status = "\(error)" }
+        let response = callEngine("delete", ["id": .string(memory.id.uuidString)])
+        if response.ok {
+            if selected?.id == memory.id { selected = nil }
+            refresh()
+        } else {
+            status = response.error ?? "Delete failed"
+        }
     }
 
     func buildContext() {
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        do {
-            let response = try client.call("build_context", ["prompt": .string(query)])
-            guard response.ok, let data = response.data, let block: ContextBlock = decode(data, as: ContextBlock.self) else { status = response.error ?? "Context build failed"; return }
-            context = block.text
-            contextTokens = block.usedTokens
-            status = "Selected \(block.usedIds.count) memories within \(block.budgetTokens)-token budget"
-        } catch { status = "\(error)" }
+        let response = callEngine("build_context", ["prompt": .string(query)])
+        guard response.ok, let data = response.data, let block: ContextBlock = decode(data, as: ContextBlock.self) else {
+            status = response.error ?? "Context build failed"
+            return
+        }
+        context = block.text
+        contextTokens = block.usedTokens
+        status = "Selected \(block.usedIds.count) memories within \(block.budgetTokens)-token budget"
+        fetchUsage()
     }
 
     func updateSettings() {
-        do {
-            let response = try client.call("update_settings", JSONValue.encode(settings).objectValue ?? [:])
-            status = response.ok ? "Settings saved" : response.error ?? "Settings failed"
-        } catch { status = "\(error)" }
+        let response = callEngine("update_settings", JSONValue.encode(settings).objectValue ?? [:])
+        status = response.ok ? "Settings saved" : response.error ?? "Settings failed"
+    }
+
+    func addSampleMemories() {
+        let samples = [
+            Memory(
+                kind: .global,
+                title: "Swift Concurrency & Sendable",
+                content: "Mark classes as final and @unchecked Sendable only when protected by internal NSLock. Favor actors or value types.",
+                tags: ["swift", "concurrency", "performance"]
+            ),
+            Memory(
+                kind: .project,
+                title: "9Router Token Economy",
+                content: "Zeddy trims contextual memories into tight budgets (default 1200 tokens). Token Saver calculates savings against full repository prompts.",
+                projectPath: Paths.base.path,
+                tags: ["9router", "tokens", "budget"]
+            ),
+            Memory(
+                kind: .project,
+                title: "Zed MCP Memory Protocol",
+                content: "Zed connects over stdio via zeddy-mcp. The tool zeddy_context automatically enriches assistant prompts with BM25 indexed snippets.",
+                projectPath: Paths.base.path,
+                tags: ["zed", "mcp", "sqlite"]
+            )
+        ]
+        for m in samples {
+            _ = callEngine("add", JSONValue.encode(AddPayload(id: m.id, kind: m.kind, title: m.title, content: m.content, projectPath: m.projectPath, tags: m.tags)).objectValue ?? [:])
+        }
+        refresh()
+        if let first = memories.first {
+            selected = first
+            draft = first
+            selectedTab = 1
+        }
+    }
+
+    func simulateTraffic() {
+        let queries = [
+            "How does Zeddy optimize token budget and memory injection?",
+            "What concurrency primitives are recommended for Swift?",
+            "How to connect Zed editor to 9Router with Model Context Protocol?",
+            "Explain SQLite FTS5 BM25 search relevance in Zeddy"
+        ]
+        Task {
+            for q in queries {
+                _ = callEngine("build_context", ["prompt": .string(q), "projectPath": .string(Paths.base.path)])
+                fetchUsage()
+                try? await Task.sleep(nanoseconds: 180_000_000)
+            }
+        }
     }
 
     private func currentSettings() -> ZeddySettings? {
-        guard let response = try? client.call("settings"), response.ok, let data = response.data else { return nil }
+        let response = callEngine("settings")
+        guard response.ok, let data = response.data else { return nil }
         return decode(data, as: ZeddySettings.self)
     }
 
@@ -183,16 +283,46 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $model.selected) {
-                Section("Memories") {
-                    ForEach(model.memories) { memory in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(memory.title).lineLimit(1)
-                            Text(memory.kind.rawValue.capitalized).font(.caption).foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                if model.memories.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "brain.head.profile")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.secondary)
+                        Text("No Memories Yet")
+                            .font(.headline)
+                        Text("Add memories or load starter samples to test context injection.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                        Button("Add Sample Memories") {
+                            model.addSampleMemories()
                         }
-                        .tag(memory)
-                        .contextMenu { Button("Delete", role: .destructive) { model.delete(memory) } }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                } else {
+                    List(selection: $model.selected) {
+                        Section("Memories (\(model.filteredMemories.count))") {
+                            ForEach(model.filteredMemories) { memory in
+                                MemoryRowView(memory: memory)
+                                    .tag(memory)
+                                    .contextMenu {
+                                        Button("Edit") {
+                                            model.draft = memory
+                                            model.showingEditor = true
+                                        }
+                                        Button("Delete", role: .destructive) {
+                                            model.delete(memory)
+                                        }
+                                    }
+                            }
+                        }
+                    }
+                    .searchable(text: $model.searchFilter, prompt: "Filter memories or tags...")
                 }
             }
             .navigationTitle("Zeddy")
@@ -201,10 +331,19 @@ struct ContentView: View {
                     ZeddyIconView(size: 24)
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button { model.draft = Memory(title: "", content: ""); model.showingEditor = true } label: { Label("New memory", systemImage: "plus") }
+                    Button {
+                        model.draft = Memory(title: "", content: "")
+                        model.showingEditor = true
+                    } label: {
+                        Label("New memory", systemImage: "plus")
+                    }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button { model.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                    Button {
+                        model.refresh()
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
                 }
             }
         } detail: {
@@ -224,28 +363,170 @@ struct ContentView: View {
             }
             .padding()
         }
-        .safeAreaInset(edge: .bottom) { Text(model.status).font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal).padding(.vertical, 6).background(.bar) }
+        .safeAreaInset(edge: .bottom) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(model.isDaemonRunning ? Color.green : Color.orange)
+                    .frame(width: 8, height: 8)
+                Text(model.status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("SQLite FTS5 • BM25")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 6)
+            .background(.bar)
+        }
         .task { model.start() }
         .sheet(isPresented: $model.showingEditor) { EditorView(model: model) }
         .sheet(item: $model.selectedEvent) { event in RequestDetailSheet(event: event) }
-        .onChange(of: model.selected) { memory in if let memory { model.draft = memory } }
+        .onChange(of: model.selected) { memory in
+            if let memory {
+                model.draft = memory
+                model.selectedTab = 1
+            }
+        }
     }
 
     private var memoryTab: some View {
         Group {
-            if let memory = model.selected {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(memory.title).font(.title2.bold())
-                    Text(memory.kind.rawValue.capitalized).foregroundStyle(.secondary)
-                    Divider()
-                    ScrollView { Text(memory.content).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }
-                    HStack { Button("Edit") { model.draft = memory; model.showingEditor = true }; Spacer(); Button("Delete", role: .destructive) { model.delete(memory) } }
+            if let memory = model.selected ?? model.memories.first {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        // Title & Kind Badge Header
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(memory.title)
+                                    .font(.title2.bold())
+                                HStack(spacing: 6) {
+                                    KindBadge(kind: memory.kind)
+                                    Text("•")
+                                        .foregroundStyle(.secondary)
+                                    Text("\(TokenEstimator.estimate(memory.content)) estimated tokens")
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                    if memory.useCount > 0 {
+                                        Text("•")
+                                            .foregroundStyle(.secondary)
+                                        Text("Used \(memory.useCount) times")
+                                            .font(.caption)
+                                            .foregroundStyle(.purple)
+                                    }
+                                }
+                            }
+                            Spacer()
+                            HStack(spacing: 8) {
+                                Button {
+                                    model.query = memory.title
+                                    model.selectedTab = 2
+                                    model.buildContext()
+                                } label: {
+                                    Label("Test in Context", systemImage: "play.fill")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Button {
+                                    model.draft = memory
+                                    model.showingEditor = true
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Button(role: .destructive) {
+                                    model.delete(memory)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
+
+                        // Tags & Metadata Row
+                        if !memory.tags.isEmpty || memory.projectPath != nil {
+                            HStack(spacing: 8) {
+                                if let proj = memory.projectPath {
+                                    Label(proj, systemImage: "folder")
+                                        .font(.caption.monospaced())
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 3)
+                                        .background(.quaternary.opacity(0.4))
+                                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                                }
+                                ForEach(memory.tags, id: \.self) { tag in
+                                    Text("#\(tag)")
+                                        .font(.caption)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 3)
+                                        .background(Color.cyan.opacity(0.12))
+                                        .foregroundStyle(.cyan)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+
+                        Divider()
+
+                        // Full Content Area
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("MEMORY CONTENT")
+                                    .font(.caption.bold().monospaced())
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(memory.content, forType: .string)
+                                } label: {
+                                    Label("Copy", systemImage: "doc.on.doc")
+                                }
+                                .buttonStyle(.plain)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+
+                            Text(memory.content)
+                                .font(.body.monospaced())
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                                .padding(12)
+                                .background(Color(nsColor: .textBackgroundColor).opacity(0.6))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                                )
+                        }
+
+                        // Details Footer
+                        HStack(spacing: 16) {
+                            Text("ID: \(memory.id.uuidString)")
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                            Spacer()
+                            Text("Created \(memory.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding()
                 }
             } else {
-                VStack(spacing: 14) {
+                VStack(spacing: 16) {
                     ZeddyIconView(size: 80)
-                    Text("Select a memory").font(.title3.bold())
-                    Text("Create or choose a memory to inspect or edit.").foregroundStyle(.secondary)
+                    Text("No Memory Selected").font(.title3.bold())
+                    Text("Create a new memory or populate sample memories to inspect.")
+                        .foregroundStyle(.secondary)
+                    Button("Add Sample Memories") {
+                        model.addSampleMemories()
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -278,8 +559,11 @@ struct UsageDashboardView: View {
             // Header Bar
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Active Throughput & Usage")
-                        .font(.title2.bold())
+                    HStack(spacing: 8) {
+                        Text("Active Throughput & Usage")
+                            .font(.title2.bold())
+                        LiveDaemonPill(model: model)
+                    }
                     Text("Real-time token economy, prompt cache compression, and latency")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -295,6 +579,14 @@ struct UsageDashboardView: View {
                 .onChange(of: model.usagePeriod) { _ in
                     model.fetchUsage()
                 }
+
+                Button {
+                    model.simulateTraffic()
+                } label: {
+                    Label("Simulate Traffic", systemImage: "sparkles")
+                }
+                .buttonStyle(.bordered)
+                .help("Fire test queries to observe real-time throughput & token savings")
 
                 Button {
                     model.fetchUsage()
@@ -316,21 +608,21 @@ struct UsageDashboardView: View {
                 KPICard(
                     title: "Total Requests",
                     value: "\(model.usageStats.totalRequests)",
-                    subtitle: "All operations",
+                    subtitle: "All-time: \(model.usageStats.allTimeRequests)",
                     icon: "arrow.triangle.2.circlepath",
                     color: .blue
                 )
                 KPICard(
                     title: "Injected Tokens",
                     value: formatTokens(model.usageStats.totalInjectedTokens),
-                    subtitle: "Context in prompt",
+                    subtitle: "All-time: \(formatTokens(model.usageStats.allTimeInjectedTokens))",
                     icon: "text.badge.plus",
                     color: .purple
                 )
                 KPICard(
                     title: "Tokens Saved",
                     value: formatTokens(model.usageStats.totalSavedTokens),
-                    subtitle: "Token Saver active",
+                    subtitle: "All-time: \(formatTokens(model.usageStats.allTimeSavedTokens))",
                     icon: "leaf.fill",
                     color: .green,
                     badge: "SAVED"
@@ -563,6 +855,93 @@ struct OperationBadge: View {
             .background(color.opacity(0.15))
             .foregroundStyle(color)
             .clipShape(Capsule())
+    }
+}
+
+struct KindBadge: View {
+    let kind: Memory.Kind
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: kind == .global ? "globe" : "folder")
+                .font(.system(size: 9))
+            Text(kind.rawValue.capitalized)
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(kind == .global ? Color.cyan.opacity(0.15) : Color.purple.opacity(0.15))
+        .foregroundStyle(kind == .global ? Color.cyan : Color.purple)
+        .clipShape(Capsule())
+    }
+}
+
+struct MemoryRowView: View {
+    let memory: Memory
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(memory.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                KindBadge(kind: memory.kind)
+            }
+
+            Text(memory.content)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+            HStack(spacing: 6) {
+                Text("\(TokenEstimator.estimate(memory.content)) tok")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+
+                if !memory.tags.isEmpty {
+                    Text("•")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                    Text(memory.tags.prefix(3).map { "#\($0)" }.joined(separator: " "))
+                        .font(.system(size: 9))
+                        .foregroundStyle(.cyan.opacity(0.8))
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+struct LiveDaemonPill: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(model.isDaemonRunning ? Color.green : Color.orange)
+                .frame(width: 7, height: 7)
+            Text(model.isDaemonRunning ? "Daemon Online" : "In-Process Mode")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(model.isDaemonRunning ? .green : .orange)
+
+            if !model.isDaemonRunning {
+                Button("Start") {
+                    model.start()
+                }
+                .font(.system(size: 9, weight: .bold))
+                .buttonStyle(.plain)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(Color.orange.opacity(0.2))
+                .clipShape(Capsule())
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(model.isDaemonRunning ? Color.green.opacity(0.12) : Color.orange.opacity(0.12))
+        .clipShape(Capsule())
     }
 }
 

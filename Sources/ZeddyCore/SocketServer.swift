@@ -86,7 +86,7 @@ public final class SocketServer: @unchecked Sendable {
                 if !running { break }
                 continue
             }
-            ioQueue.async { [handler] in
+            DispatchQueue.global(qos: .userInitiated).async { [handler] in
                 self.serveClient(fd: clientFD, handler: handler)
             }
         }

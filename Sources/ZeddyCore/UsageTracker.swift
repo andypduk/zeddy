@@ -123,7 +123,10 @@ public final class UsageTracker: @unchecked Sendable {
             requestsPerSec: reqPerSec,
             tokensPerSec: tokPerSec,
             liveBuckets: buckets,
-            period: period
+            period: period,
+            allTimeRequests: cumulativeRequests,
+            allTimeInjectedTokens: cumulativeInjectedTokens,
+            allTimeSavedTokens: cumulativeSavedTokens
         )
     }
 
