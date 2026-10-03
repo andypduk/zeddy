@@ -51,9 +51,9 @@ impl Extension for ZeddyExtension {
             }
         }
 
-        // 3. Fallback to binary on PATH
+        // Fallback default: /Applications/Zeddy.app binary
         Ok(Command {
-            command: "zeddy-mcp".to_string(),
+            command: "/Applications/Zeddy.app/Contents/MacOS/zeddy-mcp".to_string(),
             args: vec![],
             env: vec![],
         })
