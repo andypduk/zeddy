@@ -6,6 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${SCRIPT_DIR}/.build/release"
 STRESS_HOME="$(mktemp -d /tmp/zeddy-stress-XXXXXX)"
+export SCRIPT_DIR
 export ZEDDY_HOME="${STRESS_HOME}"
 
 cleanup() {
