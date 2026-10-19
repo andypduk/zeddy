@@ -76,8 +76,6 @@ impl Extension for ZeddyExtension {
                 let mut cmd = std::process::Command::new("zeddy");
                 if let Ok(path) = std::env::var("ZEDDY_BIN") {
                     cmd = std::process::Command::new(path);
-                } else if std::path::Path::new("/absolute/path/to/zeddy").exists() {
-                    cmd = std::process::Command::new("/absolute/path/to/zeddy");
                 }
 
                 if query.trim().is_empty() {
@@ -131,8 +129,8 @@ impl Extension for ZeddyExtension {
                 text.push_str(&format!("### Zeddy Search: `{}`\n\n", query));
 
                 let mut cmd = std::process::Command::new("zeddy");
-                if std::path::Path::new("/absolute/path/to/zeddy").exists() {
-                    cmd = std::process::Command::new("/absolute/path/to/zeddy");
+                if let Ok(path) = std::env::var("ZEDDY_BIN") {
+                    cmd = std::process::Command::new(path);
                 }
                 cmd.arg("search").arg(&query);
                 if !root_dir.is_empty() {

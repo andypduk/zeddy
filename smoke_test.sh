@@ -47,7 +47,7 @@ g_id=$("${BIN_DIR}/zeddy" add --title "Swift Performance" --content "Prefer stru
 echo "✓ Added global memory: ${g_id}"
 
 # Add project memory
-p_id=$("${BIN_DIR}/zeddy" add --title "Zeddy Architecture" --content "Zeddy uses SQLite FTS5 BM25 with token-budgeted context injection." --kind project --project "/tmp/zeddy-synthetic-project" --tags "zeddy,arch" | awk '{print $NF}')
+p_id=$("${BIN_DIR}/zeddy" add --title "Zeddy Architecture" --content "Zeddy uses SQLite FTS5 BM25 with token-budgeted context injection." --kind project --project "${TEST_HOME}/project" --tags "zeddy,arch" | awk '{print $NF}')
 echo "✓ Added project memory: ${p_id}"
 
 # List
@@ -73,7 +73,7 @@ echo "✓ BM25 search verified"
 
 echo ""
 echo "=== 4. Testing Context Token Budgeting ==="
-ctx_out=$("${BIN_DIR}/zeddy" context "How does Zeddy optimize Swift allocations?" --project "/tmp/zeddy-synthetic-project")
+ctx_out=$("${BIN_DIR}/zeddy" context "How does Zeddy optimize Swift allocations?" --project "${TEST_HOME}/project")
 echo "${ctx_out}"
 if [[ "${ctx_out}" != *"estimated tokens"* ]] || [[ "${ctx_out}" != *"Swift Performance"* ]]; then
     echo "FAIL: context generation failed"
@@ -100,7 +100,7 @@ if [[ "${status}" != "daemon stopped" ]]; then
     exit 1
 fi
 
-fallback_ctx=$("${BIN_DIR}/zeddy" context "SQLite FTS5 BM25" --project "/tmp/zeddy-synthetic-project")
+fallback_ctx=$("${BIN_DIR}/zeddy" context "SQLite FTS5 BM25" --project "${TEST_HOME}/project")
 if [[ "${fallback_ctx}" != *"Zeddy Architecture"* ]]; then
     echo "FAIL: In-process fallback context generation failed"
     exit 1

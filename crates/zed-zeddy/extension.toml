@@ -4,7 +4,7 @@ version = "0.1.0"
 schema_version = 1
 description = "Native Zed connector for Zeddy ultra-fast local memory service"
 repository = "https://github.com/andypduk/zeddy"
-authors = ["Andy <zeddy@localhost>"]
+authors = ["Zeddy contributors"]
 
 [lib]
 kind = "Rust"

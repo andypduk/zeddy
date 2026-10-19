@@ -233,6 +233,8 @@ Add to your client config (e.g. `~/Library/Application Support/Claude/claude_des
 }
 ```
 
+Replace `/absolute/path/to/zeddy` with the installed binary path reported by `command -v zeddy`. Use an absolute path in the client configuration.
+
 ### Available Tools
 | Tool | Description | Arguments |
 | :--- | :--- | :--- |
